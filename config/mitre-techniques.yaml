@@ -1,0 +1,175 @@
+# MITRE ATT&CK technique mappings for Trap House honeypot events.
+# Each technique maps event patterns to ATT&CK T-codes with metadata.
+# Loaded by the MITRE mapper service.
+
+techniques:
+  # Authentication
+  - id: T1110.001
+    name: Brute Force
+    subtechnique: Password Guessing
+    tactic: credential-access
+    event_types:
+      - auth_attempt
+    description: "Adversary attempts to guess credentials to access a system."
+    
+  - id: T1078
+    name: Valid Accounts
+    tactic: defense-evasion
+    event_types:
+      - auth_success
+    description: "Adversary uses credentials of existing accounts to gain access."
+
+  # Execution
+  - id: T1059
+    name: Command and Scripting Interpreter
+    tactic: execution
+    event_types:
+      - command_exec
+      - command_failed
+    description: "Adversary executes commands in a shell or interpreter."
+
+  # Initial Access
+  - id: T1190
+    name: Exploit Public-Facing Application
+    tactic: initial-access
+    event_types:
+      - sql_injection
+    description: "Adversary exploits an internet-facing application."
+
+  # Persistence
+  - id: T1505.003
+    name: Server Software Component
+    subtechnique: Web Shell
+    tactic: persistence
+    event_types:
+      - webshell_upload
+    description: "Adversary deploys a web shell to maintain access."
+
+  # Credential Access
+  - id: T1552.001
+    name: Unsecured Credentials
+    subtechnique: Credentials In Files
+    tactic: credential-access
+    event_types:
+      - credential_use
+    description: "Adversary searches for credentials in files."
+
+  # Discovery
+  - id: T1083
+    name: File and Directory Discovery
+    tactic: discovery
+    event_types:
+      - file_access
+    description: "Adversary enumerates files and directories."
+
+  - id: T1049
+    name: System Network Connections Discovery
+    tactic: discovery
+    event_types:
+      - client_kex
+    description: "Adversary discovers network connections."
+
+  # Command and Control
+  - id: T1105
+    name: Ingress Tool Transfer
+    tactic: command-and-control
+    event_types:
+      - file_upload
+      - file_download
+    description: "Adversary transfers tools or files into the environment."
+
+  # Lateral Movement
+  - id: T1021
+    name: Remote Services
+    tactic: lateral-movement
+    event_types:
+      - proxy_request
+      - proxy_data
+    description: "Adversary uses remote services for lateral movement."
+
+  # Reconnaissance (tarpit interactions)
+  - id: T1595.001
+    name: Active Scanning
+    subtechnique: Scanning IP Blocks
+    tactic: reconnaissance
+    event_types:
+      - tarpit_connect
+      - session_connect
+    description: "Adversary scans for open ports and services."
+
+# Regex-based pattern matching for deeper detection.
+# These patterns are checked against raw_data and details fields.
+patterns:
+  - technique: T1110.004
+    name: Brute Force
+    subtechnique: Credential Stuffing
+    tactic: credential-access
+    regex: "(?i)(hydra|medusa|patator|ncrack|brute)"
+    field: raw_data
+    description: "Automated brute force tool detected in session data."
+
+  - technique: T1190
+    name: Exploit Public-Facing Application
+    tactic: initial-access
+    regex: "(?i)(sqlmap|nikto|nuclei|metasploit|burp)"
+    field: raw_data
+    description: "Automated exploitation tool detected."
+
+  - technique: T1059.004
+    name: Command and Scripting Interpreter
+    subtechnique: Unix Shell
+    tactic: execution
+    regex: "(?i)(/bin/(ba)?sh|powershell|cmd\\.exe)"
+    field: details
+    description: "Shell invocation detected in command execution."
+
+  - technique: T1003.008
+    name: OS Credential Dumping
+    subtechnique: /etc/passwd and /etc/shadow
+    tactic: credential-access
+    regex: "(?i)(cat|head|tail|less|more)\\s+.*(passwd|shadow)"
+    field: details
+    description: "Attempted credential file access."
+
+  - technique: T1087
+    name: Account Discovery
+    tactic: discovery
+    regex: "(?i)(whoami|id|w|last|getent|net\\s+user)"
+    field: details
+    description: "Account enumeration command detected."
+
+  - technique: T1082
+    name: System Information Discovery
+    tactic: discovery
+    regex: "(?i)(uname|hostname|arch|lscpu|/proc/version)"
+    field: details
+    description: "System information discovery detected."
+
+  - technique: T1083
+    name: File and Directory Discovery
+    tactic: discovery
+    regex: "(?i)(ls|dir|find|tree|locate)"
+    field: details
+    description: "File and directory enumeration detected."
+
+  - technique: T1046
+    name: Network Service Discovery
+    tactic: discovery
+    regex: "(?i)(nmap|masscan|zmap|netcat|nc\\s)"
+    field: details
+    description: "Network scanning activity detected."
+
+  - technique: T1105
+    name: Ingress Tool Transfer
+    tactic: command-and-control
+    regex: "(?i)(wget|curl|scp|ftp|tftp)\\s"
+    field: details
+    description: "File download attempt detected."
+
+  - technique: T1071.001
+    name: Application Layer Protocol
+    subtechnique: Web Protocols
+    tactic: command-and-control
+    regex: "(?i)(curl|wget).*http"
+    field: details
+    description: "HTTP-based C2 activity detected."
