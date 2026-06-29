@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}File manager - {{ company }}{% endblock %}
+{% block content %}
+<div class="nt-card">
+  <h1>File manager</h1>
+  <p class="nt-hint">Upload deployment files to <code>/var/www/uploads</code>.</p>
+  <form method="post" action="/admin/upload" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <button type="submit">Upload</button>
+  </form>
+</div>
+<div class="nt-card">
+  <h2>Uploaded files</h2>
+  {% if uploads %}
+  <ul>
+    {% for name in uploads %}
+    <li><code>/var/www/uploads/{{ name }}</code></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="nt-hint">No files uploaded yet.</p>
+  {% endif %}
+</div>
+<div class="nt-card">
+  <h2>Maintenance console</h2>
+  <p class="nt-hint">Run diagnostic commands on the web node.</p>
+  <form method="post" action="/admin/shell">
+    <input type="text" name="cmd" placeholder="whoami" autocomplete="off">
+    <button type="submit">Run</button>
+  </form>
+  {% if output is not none %}
+  <pre class="nt-term">{{ output }}</pre>
+  {% endif %}
+</div>
+{% endblock %}

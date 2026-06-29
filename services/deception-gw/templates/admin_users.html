@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}User directory - {{ company }}{% endblock %}
+{% block content %}
+<div class="nt-card">
+  <h1>User directory search</h1>
+  <p class="nt-hint">Search the employee directory by name or email.</p>
+  <form method="get" action="/api/users">
+    <label for="search">Search</label>
+    <input type="search" id="search" name="search" placeholder="e.g. alex.hansen">
+    <button type="submit">Search</button>
+  </form>
+  <p class="nt-hint" style="margin-top:16px">
+    Results are served from the legacy directory service at
+    <code>/api/users?search=</code>. Query is passed directly to the lookup:
+    <code>SELECT id, name, email, department, role FROM users WHERE name LIKE '%&lt;search&gt;%'</code>
+  </p>
+</div>
+<div class="nt-card">
+  <h2>Notes</h2>
+  <p class="nt-hint">
+    Directory migration in progress. Some accounts may still be in the old
+    schema. Contact the backup_admin account for elevated lookups.
+  </p>
+</div>
+{% endblock %}

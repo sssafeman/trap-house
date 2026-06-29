@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - {{ company }}{% endblock %}
+{% block content %}
+<div class="nt-card">
+  <h1>Welcome back, {{ username }}</h1>
+  <p class="nt-hint">You are signed in to the {{ company }} internal operations portal.</p>
+</div>
+<div class="nt-card">
+  <h2>Company overview</h2>
+  <table>
+    <tr><th>Employees</th><td>{{ stats.employees }}</td></tr>
+    <tr><th>Active servers</th><td>{{ stats.active_servers }}</td></tr>
+    <tr><th>Open tickets</th><td>{{ stats.open_tickets }}</td></tr>
+    <tr><th>Revenue (Q2)</th><td>{{ stats.revenue_q2 }}</td></tr>
+  </table>
+</div>
+<div class="nt-card">
+  <h2>Admin tools</h2>
+  <ul>
+    <li><a href="/admin/users">User directory search</a></li>
+    <li><a href="/admin/files">File manager</a></li>
+    <li><a href="/admin/config">System configuration</a></li>
+    <li><a href="/admin/backup">Database backups</a></li>
+  </ul>
+</div>
+{% endblock %}
