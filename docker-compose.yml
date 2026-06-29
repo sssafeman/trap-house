@@ -89,6 +89,26 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # MITRE mapper. Reads events from SQLite, maps to ATT&CK techniques,
+  # builds attacker profiles with risk scoring.
+  mitre-mapper:
+    build: ./services/mitre-mapper
+    container_name: trap-mitre-mapper
+    networks:
+      - trap-internal
+    volumes:
+      - ./data/db:/data/db
+      - ./config:/config:ro
+    environment:
+      - DB_PATH=/data/db/trap-house.db
+      - TECHNIQUES_FILE=/config/mitre-techniques.yaml
+      - POLL_INTERVAL=5
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   cowrie-var:
     driver: local
