@@ -1,0 +1,38 @@
+# Data and logs
+data/
+*.db
+*.db-journal
+*.jsonl
+*.log
+
+# Environment
+.env
+.env.hetzner
+.env.production
+
+# Secrets
+*.pem
+*.key
+*.crt
+secrets/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
