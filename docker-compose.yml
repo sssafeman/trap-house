@@ -33,9 +33,31 @@ services:
     volumes:
       - ./data/logs/cowrie:/var/log/trap-house
       - ./services/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - ./services/cowrie/honeyfs:/cowrie/cowrie-git/honeyfs:ro
       - cowrie-var:/cowrie/cowrie-git/var
     cap_drop:
       - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Deception middleware. FastAPI fake corporate web app with maze logic.
+  deception-gw:
+    build: ./services/deception-gw
+    container_name: trap-deception-gw
+    ports:
+      - "${DECEPTION_PORT:-8080}:8000"
+    networks:
+      - trap-external
+    volumes:
+      - ./data/logs/deception-gw:/var/log/trap-house
+    environment:
+      - ENABLE_CANARYTOKENS=${ENABLE_CANARYTOKENS:-false}
+      - SESSION_SECRET=${SESSION_SECRET:-changeme-secret-key}
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
@@ -49,7 +71,9 @@ services:
       - trap-internal
     volumes:
       # Read Cowrie JSON logs from bind mount
-      - ./data/logs/cowrie:/var/log/trap-house:ro
+      - ./data/logs/cowrie:/var/log/trap-house/cowrie:ro
+      # Read deception-gw JSON logs from bind mount
+      - ./data/logs/deception-gw:/var/log/trap-house/deception-gw:ro
       # SQLite database persisted on host
       - ./data/db:/data/db
       # Docker socket for reading endlessh container logs

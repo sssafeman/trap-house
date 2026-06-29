@@ -59,6 +59,10 @@ MITRE_MAP: dict[str, tuple[str, str]] = {
     "proxy_request": ("T1021", "lateral-movement"),
     "proxy_data": ("T1021", "lateral-movement"),
     "client_kex": ("T1049", "discovery"),
+    "sql_injection": ("T1190", "initial-access"),
+    "webshell_upload": ("T1505.003", "persistence"),
+    "credential_use": ("T1552", "credential-access"),
+    "file_access": ("T1083", "discovery"),
 }
 
 
@@ -247,6 +251,58 @@ def normalize_endlessh(line: str) -> dict[str, Any] | None:
     return None
 
 
+def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Convert a deception-gw JSONL event to the Trap House event schema.
+    deception-gw writes events already conforming to the shared schema,
+    so this is mostly a passthrough with field validation."""
+    event_type = raw.get("event_type", "unknown")
+    source_ip = raw.get("source_ip", "")
+    session_id = raw.get("session_id", str(uuid.uuid4()))
+
+    # MITRE mapping
+    mitre_technique = ""
+    mitre_tactic = ""
+    if event_type in MITRE_MAP:
+        mitre_technique, mitre_tactic = MITRE_MAP[event_type]
+
+    # Build attacker fingerprint from deception-gw data
+    fingerprint: dict[str, Any] = {}
+    if "user_agent" in raw:
+        fingerprint["user_agent"] = raw["user_agent"]
+    if "tool" in raw:
+        fingerprint["tool"] = raw["tool"]
+    elif "user_agent" in raw:
+        ua = raw["user_agent"].lower()
+        if "sqlmap" in ua:
+            fingerprint["tool"] = "sqlmap"
+        elif "curl" in ua:
+            fingerprint["tool"] = "curl"
+        elif "python" in ua:
+            fingerprint["tool"] = "python-script"
+        else:
+            fingerprint["tool"] = "browser"
+
+    return {
+        "event_id": raw.get("event_id", str(uuid.uuid4())),
+        "timestamp": raw.get("timestamp", datetime.now(timezone.utc).isoformat()),
+        "source_service": "deception-gw",
+        "source_ip": source_ip,
+        "source_port": raw.get("source_port"),
+        "dest_port": raw.get("dest_port", 8000),
+        "event_type": event_type,
+        "session_id": session_id,
+        "cowrie_session": None,
+        "protocol": "http",
+        "username": raw.get("username", ""),
+        "command": raw.get("command", ""),
+        "attacker_fingerprint": json.dumps(fingerprint) if fingerprint else None,
+        "mitre_technique": mitre_technique,
+        "mitre_tactic": mitre_tactic,
+        "details": json.dumps(raw.get("details", {})) if raw.get("details") else None,
+        "raw_data": json.dumps(raw),
+    }
+
+
 def insert_event(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
     """Insert a normalized event into SQLite."""
     conn.execute(
@@ -361,14 +417,15 @@ def main() -> None:
     conn = get_db()
     print("[log-shipper] SQLite database initialized")
 
-    # Track file offsets for incremental reading (Cowrie)
+    # Track file offsets for incremental reading (Cowrie and deception-gw)
     offsets: dict[str, int] = {}
-    cowrie_file = LOG_DIR / "cowrie.json"
+    cowrie_file = LOG_DIR / "cowrie" / "cowrie.json"
+    deception_gw_file = LOG_DIR / "deception-gw" / "deception-gw.json"
 
     # Track time for Endlessh docker logs polling
     last_endlessh_poll = time.time()
 
-    print(f"[log-shipper] Watching: cowrie ({cowrie_file}), endlessh (docker logs)")
+    print(f"[log-shipper] Watching: cowrie ({cowrie_file}), deception-gw ({deception_gw_file}), endlessh (docker logs)")
 
     while True:
         # Process Cowrie logs (file tail)
@@ -388,6 +445,24 @@ def main() -> None:
                 print(f"[log-shipper] JSON parse error in cowrie: {line[:100]}")
             except Exception as e:
                 print(f"[log-shipper] Error processing cowrie event: {e}")
+
+        # Process deception-gw logs (file tail)
+        offset = offsets.get("deception-gw", 0)
+        lines, new_offset = tail_file(deception_gw_file, offset)
+        offsets["deception-gw"] = new_offset
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw = json.loads(line)
+                event = normalize_deception_gw(raw)
+                insert_event(conn, event)
+            except json.JSONDecodeError:
+                print(f"[log-shipper] JSON parse error in deception-gw: {line[:100]}")
+            except Exception as e:
+                print(f"[log-shipper] Error processing deception-gw event: {e}")
 
         # Process Endlessh logs (docker logs poll every 10 seconds)
         now = time.time()
