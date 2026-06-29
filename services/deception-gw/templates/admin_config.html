@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}System configuration - {{ company }}{% endblock %}
+{% block content %}
+<div class="nt-card">
+  <h1>System configuration</h1>
+  <p class="nt-hint">Cloud integration credentials for the deployment pipeline.</p>
+  <table>
+    <tr><th>AWS region</th><td>eu-north-1</td></tr>
+    <tr><th>AWS access key id</th><td><code>{{ aws_access_key }}</code></td></tr>
+    <tr><th>AWS secret access key</th><td><code>{{ aws_secret_key }}</code></td></tr>
+    <tr><th>S3 backup bucket</th><td>nordtech-prod-backups</td></tr>
+  </table>
+</div>
+<div class="nt-card">
+  <h2>Related</h2>
+  <p class="nt-hint">
+    Database backup credentials are managed on the
+    <a href="/admin/backup">backup page</a>.
+  </p>
+</div>
+{% endblock %}

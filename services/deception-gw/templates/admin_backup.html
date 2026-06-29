@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Database backups - {{ company }}{% endblock %}
+{% block content %}
+<div class="nt-card">
+  <h1>Database backups</h1>
+  <p class="nt-hint">Nightly backups of the production database cluster.</p>
+  <table>
+    <tr><th>Backup host</th><td>db-backup-01.internal</td></tr>
+    <tr><th>Database user</th><td><code>{{ db_user }}</code></td></tr>
+    <tr><th>Database password</th><td><code>{{ db_pass }}</code></td></tr>
+    <tr><th>Last backup</th><td>2026-06-29 03:00 UTC</td></tr>
+  </table>
+</div>
+<div class="nt-card">
+  <h2>Restore access</h2>
+  <p class="nt-hint">
+    To restore from backup, sign in to the portal at
+    <a href="/login">/login</a> using the database credentials above.
+  </p>
+</div>
+{% endblock %}
