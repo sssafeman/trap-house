@@ -1,0 +1,50 @@
+services:
+  # SSH tarpit. Accepts connections and drip-feeds a fake banner at 1 byte/sec.
+  endlessh:
+    image: lscr.io/linuxserver/endlessh:version-dfe44eb2
+    container_name: trap-endlessh
+    ports:
+      - "${ENDLESSH_PORT:-22222}:2222"
+    networks:
+      - trap-external
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
+      - /config:noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # SSH/Telnet honeypot. Accepts credentials, provides fake shell, logs JSON.
+  cowrie:
+    image: cowrie/cowrie:sha-a2887ca
+    container_name: trap-cowrie
+    ports:
+      - "${COWRIE_SSH_PORT:-2222}:2222"
+      - "${COWRIE_TELNET_PORT:-2223}:2223"
+    networks:
+      - trap-external
+    volumes:
+      - trap-logs:/var/log/trap-house
+      - ./services/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - cowrie-var:/cowrie/cowrie-git/var
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  trap-logs:
+    driver: local
+  cowrie-var:
+    driver: local
+
+networks:
+  trap-external:
+    driver: bridge
+  trap-internal:
+    driver: bridge
+    internal: true

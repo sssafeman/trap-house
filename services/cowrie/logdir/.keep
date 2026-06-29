@@ -1,0 +1,2 @@
+# Placeholder so the build can create /var/log/trap-house owned by uid 999.
+# See services/cowrie/Dockerfile for why this exists.
