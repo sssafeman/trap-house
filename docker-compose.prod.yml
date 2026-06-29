@@ -1,0 +1,41 @@
+# Trap House Production Override (Hetzner)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d
+#
+# Key differences from dev:
+# - Endlessh on port 22 (host SSH moves to high port via harden.sh)
+# - Deception-gw on port 80
+# - Grafana and frontend have NO external ports (accessed via SSH tunnel)
+# - SSH tunnel: ssh -L 8001:localhost:8001 -L 3000:localhost:3000 user@vps
+# - Grafana anonymous access disabled, admin password required
+#
+# The !reset and !override tags are Docker Compose v2+ features for
+# replacing list values in merge overrides.
+
+services:
+  endlessh:
+    ports: !override
+      - "22:2222"
+
+  cowrie:
+    ports: !override
+      - "2222:2222"
+      - "2223:2223"
+
+  deception-gw:
+    ports: !override
+      - "80:8000"
+
+  frontend:
+    ports: !reset []
+    networks: !override
+      - trap-internal
+
+  grafana:
+    ports: !reset []
+    networks: !override
+      - trap-internal
+    environment: !override
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false

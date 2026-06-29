@@ -72,12 +72,5 @@ All services log to the shared schema defined in EVENT_SCHEMA.md. Read it before
 Local dev uses high ports to avoid conflicts with host SSH (port 22) and Tailscale (port 443).
 Production (Hetzner) uses real ports. See .env.example for details.
 
-## Current Phase: Phase 4 (Dashboard)
-Read docs/PHASE4_DESIGN.md for the full spec. Key points:
-- Dark SOC theme: bg #0a0e14, panels #111820, accent #00d4ff, danger #ff4444, text #c5cdd6
-- Vanilla JS, no framework. Leaflet 1.9.4 from CDN for the attack map.
-- CSS Grid layout, custom properties for theme, no CSS framework.
-- FastAPI serves both API endpoints and static HTML/CSS/JS from same app (no CORS).
-- Frontend on trap-internal only. Grafana on trap-internal only (SSH tunnel in prod).
-- All API queries are read-only SELECT against SQLite. No writes.
-- Auto-refresh every 10 seconds via JS polling.
+## Current Phase: Complete (Phases 1 through 5 done)
+All 8 containers running. Production deployment config in deploy/. See README.md for full documentation.
