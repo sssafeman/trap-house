@@ -109,6 +109,66 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Threat intelligence frontend. Custom FastAPI dashboard with Leaflet map,
+  # MITRE heatmap, session replay, and event timeline.
+  frontend:
+    build: ./services/frontend
+    container_name: trap-frontend
+    ports:
+      - "${FRONTEND_PORT:-8001}:8001"
+    networks:
+      - trap-external
+      - trap-internal
+    volumes:
+      - ./data/db:/data/db:ro
+    environment:
+      - DB_PATH=/data/db/trap-house.db
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Loki log aggregation. Receives structured logs from log-shipper.
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: trap-loki
+    networks:
+      - trap-internal
+    volumes:
+      - ./data/loki:/loki
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Grafana dashboard for log-based metrics. Internal only.
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: trap-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - trap-internal
+      - trap-external  # Dev access via host port. Prod: SSH tunnel only.
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   cowrie-var:
     driver: local
