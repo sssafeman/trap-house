@@ -72,13 +72,12 @@ All services log to the shared schema defined in EVENT_SCHEMA.md. Read it before
 Local dev uses high ports to avoid conflicts with host SSH (port 22) and Tailscale (port 443).
 Production (Hetzner) uses real ports. See .env.example for details.
 
-## Current Phase: Phase 2 (Deception Middleware)
-Read docs/PHASE2_DESIGN.md for the full spec. Key non-negotiables:
-- No real exec in webshell (no subprocess, eval, exec, os.system, __import__)
-- No LLM, no WebSocket, no real database
-- Canarytokens disabled by default (ENABLE_CANARYTOKENS=false)
-- JSONL logging to /var/log/trap-house/deception-gw.json per EVENT_SCHEMA.md
-- Signed session cookies (itsdangerous)
-- In-memory fake filesystem only
-- Runs as non-root (UID 1000), cap_drop ALL, no-new-privileges
-- No outbound network except optional canarytokens webhook
+## Current Phase: Phase 4 (Dashboard)
+Read docs/PHASE4_DESIGN.md for the full spec. Key points:
+- Dark SOC theme: bg #0a0e14, panels #111820, accent #00d4ff, danger #ff4444, text #c5cdd6
+- Vanilla JS, no framework. Leaflet 1.9.4 from CDN for the attack map.
+- CSS Grid layout, custom properties for theme, no CSS framework.
+- FastAPI serves both API endpoints and static HTML/CSS/JS from same app (no CORS).
+- Frontend on trap-internal only. Grafana on trap-internal only (SSH tunnel in prod).
+- All API queries are read-only SELECT against SQLite. No writes.
+- Auto-refresh every 10 seconds via JS polling.

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Trap House SOC{% endblock %}</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topnav">
+    <div class="brand">
+      <span class="brand-mark">&#9608;</span>
+      <span class="brand-name">TRAP HOUSE</span>
+      <span class="brand-sub">SOC / Threat Intelligence</span>
+    </div>
+    <div class="nav-status">
+      <span class="status-dot" id="live-dot"></span>
+      <span id="live-label">LIVE</span>
+      <span class="refresh-meta">refresh <span id="refresh-countdown">10</span>s</span>
+      <span class="refresh-meta">updated <span id="last-updated">never</span></span>
+    </div>
+  </header>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span>Trap House deception honeypot. Detection and intelligence only. No hack-back.</span>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

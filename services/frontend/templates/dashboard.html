@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Trap House SOC Dashboard{% endblock %}
+
+{% block content %}
+<section class="stats-bar" id="stats-bar">
+  <div class="stat-card">
+    <div class="stat-value" id="stat-events">0</div>
+    <div class="stat-label">Total Events</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-attackers">0</div>
+    <div class="stat-label">Unique IPs</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-sessions">0</div>
+    <div class="stat-label">Sessions</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-techniques">0</div>
+    <div class="stat-label">MITRE Techniques</div>
+  </div>
+</section>
+
+<section class="grid-main">
+  <div class="panel" id="panel-map">
+    <div class="panel-head">
+      <h2>Attack Origins</h2>
+      <span class="panel-note">Geo locations based on source IP. Dev mode shows internal Docker IPs.</span>
+    </div>
+    <div id="attack-map" class="map-canvas"></div>
+  </div>
+
+  <div class="panel" id="panel-heatmap">
+    <div class="panel-head">
+      <h2>MITRE ATT&amp;CK Heatmap</h2>
+      <span class="panel-note" id="heatmap-filter-note">Click a technique to filter the timeline.</span>
+    </div>
+    <div id="mitre-heatmap" class="heatmap-canvas"></div>
+  </div>
+</section>
+
+<section class="grid-bottom">
+  <div class="panel" id="panel-timeline">
+    <div class="panel-head">
+      <h2>Attack Timeline</h2>
+      <div class="filter-bar" id="timeline-filters">
+        <select id="filter-service" class="filter-input">
+          <option value="">all services</option>
+        </select>
+        <select id="filter-eventtype" class="filter-input">
+          <option value="">all event types</option>
+        </select>
+        <select id="filter-sourceip" class="filter-input">
+          <option value="">all source IPs</option>
+        </select>
+        <button id="filter-clear" class="filter-btn">clear</button>
+      </div>
+    </div>
+    <div id="timeline" class="timeline-canvas"></div>
+    <div id="timeline-detail" class="timeline-detail">Hover a dot for event details.</div>
+  </div>
+
+  <div class="panel" id="panel-replay">
+    <div class="panel-head">
+      <h2>Session Replay</h2>
+      <select id="session-select" class="filter-input">
+        <option value="">select a session</option>
+      </select>
+    </div>
+    <div id="session-replay" class="replay-canvas">
+      <div class="replay-empty">Select a session to replay attacker progression through the deception layers.</div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/attack-map.js"></script>
+<script src="/static/js/mitre-heatmap.js"></script>
+<script src="/static/js/session-replay.js"></script>
+<script src="/static/js/timeline.js"></script>
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

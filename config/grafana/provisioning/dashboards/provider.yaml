@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: Trap House
+    orgId: 1
+    folder: Trap House
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
