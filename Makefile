@@ -1,4 +1,4 @@
-.PHONY: up down logs test clean
+.PHONY: up down logs test clean prod-up prod-down prod-logs
 
 up:
 	docker compose up -d
@@ -14,3 +14,13 @@ test:
 
 clean:
 	docker compose down -v
+
+# Production targets (Hetzner)
+prod-up:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d
+
+prod-down:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner down
+
+prod-logs:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner logs -f
