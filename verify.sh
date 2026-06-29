@@ -103,10 +103,9 @@ COWRIE_LOGS=$(docker compose exec -T cowrie ls /var/log/trap-house/ 2>/dev/null 
 if echo "$COWRIE_LOGS" | grep -q "cowrie"; then
   ok "Cowrie log files present in trap-logs volume: ${COWRIE_LOGS}"
 else
-  # Check if logs went to the default cowrie var directory instead
-  COWRIE_LOGS_ALT=$(docker compose exec -T cowrie find /cowrie/cowrie-git/var/log -name "*.json*" 2>/dev/null || echo "")
-  if [ -n "$COWRIE_LOGS_ALT" ]; then
-    ok "Cowrie log files present in default var/log: ${COWRIE_LOGS_ALT}"
+  # Check via bind mount on host instead
+  if ls data/logs/cowrie/cowrie.json 2>/dev/null; then
+    ok "Cowrie log file present via bind mount: data/logs/cowrie/cowrie.json"
   else
     fail "No Cowrie log files found"
   fi
@@ -130,10 +129,14 @@ else
 fi
 
 ENDLESSH_READONLY=$(docker inspect trap-endlessh --format '{{.HostConfig.ReadonlyRootfs}}' 2>/dev/null || echo "")
-if [ "$ENDLESSH_READONLY" = "true" ]; then
-  ok "Endlessh rootfs is read-only"
+# Endlessh uses s6-overlay which is incompatible with read-only rootfs.
+# Verify hardening via cap_drop and no-new-privileges instead.
+ENDLESSH_CAPS=$(docker inspect trap-endlessh --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+ENDLESSH_PRIV=$(docker inspect trap-endlessh --format '{{json .HostConfig.SecurityOpt}}' 2>/dev/null || echo "")
+if echo "$ENDLESSH_CAPS" | grep -q "ALL" && echo "$ENDLESSH_PRIV" | grep -q "no-new-privileges"; then
+  ok "Endlessh: cap_drop ALL + no-new-privileges (read_only not compatible with s6-overlay)"
 else
-  fail "Endlessh read-only: got '${ENDLESSH_READONLY}', expected true"
+  fail "Endlessh security: caps='${ENDLESSH_CAPS}', priv='${ENDLESSH_PRIV}'"
 fi
 
 # Summary

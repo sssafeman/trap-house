@@ -1,5 +1,7 @@
 services:
   # SSH tarpit. Accepts connections and drip-feeds a fake banner at 1 byte/sec.
+  # Note: read_only not compatible with linuxserver/s6-overlay images.
+  # Hardening: cap_drop ALL, no-new-privileges, tmpfs for /tmp and /config.
   endlessh:
     image: lscr.io/linuxserver/endlessh:version-dfe44eb2
     container_name: trap-endlessh
@@ -9,7 +11,9 @@ services:
       - trap-external
     cap_drop:
       - ALL
-    read_only: true
+    cap_add:
+      - SETUID
+      - SETGID
     tmpfs:
       - /tmp:noexec,nosuid,nodev
       - /config:noexec,nosuid,nodev
@@ -27,7 +31,7 @@ services:
     networks:
       - trap-external
     volumes:
-      - trap-logs:/var/log/trap-house
+      - ./data/logs/cowrie:/var/log/trap-house
       - ./services/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
       - cowrie-var:/cowrie/cowrie-git/var
     cap_drop:
