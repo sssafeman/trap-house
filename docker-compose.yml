@@ -40,9 +40,32 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Log shipper. Reads Cowrie JSON logs and Endlessh stdout (via docker logs),
+  # normalizes to shared event schema, writes to SQLite.
+  log-shipper:
+    build: ./services/log-shipper
+    container_name: trap-log-shipper
+    networks:
+      - trap-internal
+    volumes:
+      # Read Cowrie JSON logs from bind mount
+      - ./data/logs/cowrie:/var/log/trap-house:ro
+      # SQLite database persisted on host
+      - ./data/db:/data/db
+      # Docker socket for reading endlessh container logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ENDLESSH_CONTAINER=trap-endlessh
+      - DB_PATH=/data/db/trap-house.db
+      - LOG_DIR=/var/log/trap-house
+      - POLL_INTERVAL=2
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
-  trap-logs:
-    driver: local
   cowrie-var:
     driver: local
 
