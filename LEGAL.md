@@ -42,10 +42,11 @@ Canarytokens.org integration sends attacker behavior data (IP, user agent) to a 
 
 A local canary logger is provided as fallback. It logs canary trigger events locally without contacting any external service.
 
-## Data Retention
-- Logs retained for 90 days maximum
-- SQLite database retained for 180 days maximum
-- Automated cleanup via log-shipper (configurable)
+## Data Retention (Planned)
+- Logs targeted for 90 day retention
+- SQLite database targeted for 180 day retention
+- Automated cleanup not yet implemented. Until implemented, monitor disk usage manually.
+- Docker logging driver set to json-file with size limits (planned)
 - No PII stored beyond attacker IP and user agent (which are operational data, not personal data under GDPR for security purposes)
 
 ## Production Deployment

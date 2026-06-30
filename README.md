@@ -9,7 +9,7 @@ Most student honeypot projects do one thing: deploy Cowrie, collect some logs, w
 ### Differentiators
 
 - **Custom deception middleware**: Not just deployed Cowrie. A purpose-built FastAPI fake corporate web app with 5 deception layers that route attackers in circles.
-- **MITRE ATT&CK mapping**: Two-layer detection. Static event-type mapping (15 techniques) plus regex pattern matching (10 patterns) that catches behavioral indicators like credential dumping, system discovery, and account enumeration.
+- **MITRE ATT&CK mapping**: Two-layer detection. Static event-type mapping (11 techniques across 15 event mappings) plus regex pattern matching (10 patterns) that catches behavioral indicators like credential dumping, system discovery, and account enumeration.
 - **Attacker profiling with risk scoring**: Per-IP profiles tracking tools detected, MITRE techniques used, session count, and a weighted risk score.
 - **Custom SOC dashboard**: Dark-themed security operations center interface with a Leaflet attack map, MITRE heatmap, session replay showing attacker journey through deception layers, and a filterable event timeline.
 - **Sandboxed webshell**: File upload accepts webshells but executes against an in-memory fake filesystem. No real code execution, no subprocess, no eval. Every command is logged.
@@ -79,7 +79,7 @@ Every interaction at every layer is logged as JSONL, normalized to the shared ev
 
 ## MITRE ATT&CK Coverage
 
-### Static Event-Type Mapping (15 techniques)
+### Static Event-Type Mapping (11 techniques, 15 event mappings)
 | Technique | Name | Tactic |
 |-----------|------|--------|
 | T1110.001 | Brute Force: Password Guessing | Credential Access |

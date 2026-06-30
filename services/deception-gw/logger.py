@@ -25,8 +25,8 @@ MITRE_MAP: dict[str, tuple[str, str]] = {
 
 def _now_iso() -> str:
     """Return the current UTC time as an ISO 8601 string with millisecond Z."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + \
-        f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 def detect_tool(user_agent: str) -> str:

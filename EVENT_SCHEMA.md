@@ -83,10 +83,10 @@ Every attacker interaction is grouped into a session. A session starts when an a
 
 ## Log File Locations
 
-Each honeypot service writes JSONL to /var/log/trap-house/<service>.jsonl:
-- /var/log/trap-house/cowrie.jsonl
-- /var/log/trap-house/endlessh.jsonl
-- /var/log/trap-house/deception-gw.jsonl
+Each honeypot service writes JSONL to /var/log/trap-house/:
+- Cowrie: /var/log/trap-house/cowrie.json (via bind mount, configured in cowrie.cfg)
+- deception-gw: /var/log/trap-house/deception-gw.json (via bind mount, configured in config.py)
+- Endlessh: stdout captured via `docker logs` (no file, read by log-shipper through Docker API)
 
 log-shipper reads these files and writes normalized events to:
 - intel-store (SQLite: events table)

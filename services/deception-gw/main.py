@@ -231,9 +231,10 @@ async def api_users(request: Request, search: str = "") -> JSONResponse:
 
     if is_injection:
         rows = FAKE_USERS
+        sess = _session(request)
+        session_id = sess.get("session_id") if sess else None
         logger.log_event(
-            "sql_injection", ip, port,
-            _session(request).get("session_id") if _session(request) else None,
+            "sql_injection", ip, port, session_id,
             {"endpoint": "/api/users", "payload": search, "rows_returned": len(rows)},
             user_agent=ua,
         )

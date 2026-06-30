@@ -5,10 +5,10 @@ data/
 *.jsonl
 *.log
 
-# Environment
-.env
-.env.hetzner
-.env.production
+# Environment (root-level only, does not match honeyfs decoy)
+/.env
+/.env.hetzner
+/.env.production
 
 # Secrets
 *.pem

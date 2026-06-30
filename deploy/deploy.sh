@@ -42,6 +42,7 @@ chown -R 999:999 data/logs/cowrie
 chown -R 1000:1000 data/logs/deception-gw data/db
 chown -R 10001:10001 data/loki
 chown -R 472:472 data/grafana
+chmod -R a+rX config/grafana/provisioning
 
 # Build custom images
 echo "[2/4] Building Docker images..."

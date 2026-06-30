@@ -4,12 +4,12 @@ Trap House Log Shipper
 
 Reads raw JSON logs from honeypot services (Cowrie, Endlessh),
 normalizes them to the shared Trap House event schema (EVENT_SCHEMA.md),
-and writes to a SQLite database.
+writes to a SQLite database, and pushes to Loki for Grafana visualization.
 
-Cowrie: reads JSONL from /var/log/trap-house/cowrie.json
+Cowrie: reads JSONL from /var/log/trap-house/cowrie/cowrie.json
 Endlessh: reads stdout via `docker logs` (requires Docker socket mount)
-
-Future phases will also push to Loki and trigger MITRE mapping.
+deception-gw: reads JSONL from /var/log/trap-house/deception-gw/deception-gw.json
+Loki: pushes normalized events to http://loki:3100/loki/api/v1/push
 """
 
 import json
@@ -17,6 +17,8 @@ import os
 import sqlite3
 import subprocess
 import time
+import urllib.request
+import urllib.error
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +29,7 @@ LOG_DIR = Path(os.environ.get("LOG_DIR", "/var/log/trap-house"))
 DB_PATH = os.environ.get("DB_PATH", "/data/db/trap-house.db")
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "2"))
 ENDLESSH_CONTAINER = os.environ.get("ENDLESSH_CONTAINER", "trap-endlessh")
+LOKI_URL = os.environ.get("LOKI_URL", "http://loki:3100/loki/api/v1/push")
 
 # Cowrie event ID to Trap House event type mapping
 COWRIE_EVENT_MAP: dict[str, str] = {
@@ -50,7 +53,7 @@ COWRIE_EVENT_MAP: dict[str, str] = {
 
 # MITRE ATT&CK mapping for Cowrie event types
 MITRE_MAP: dict[str, tuple[str, str]] = {
-    "auth_attempt": ("T1110", "credential-access"),
+    "auth_attempt": ("T1110.001", "credential-access"),
     "auth_success": ("T1078", "defense-evasion"),
     "command_exec": ("T1059", "execution"),
     "command_failed": ("T1059", "execution"),
@@ -61,7 +64,7 @@ MITRE_MAP: dict[str, tuple[str, str]] = {
     "client_kex": ("T1049", "discovery"),
     "sql_injection": ("T1190", "initial-access"),
     "webshell_upload": ("T1505.003", "persistence"),
-    "credential_use": ("T1552", "credential-access"),
+    "credential_use": ("T1552.001", "credential-access"),
     "file_access": ("T1083", "discovery"),
 }
 
@@ -303,6 +306,46 @@ def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def push_to_loki(events: list[dict[str, Any]]) -> None:
+    """Push a batch of normalized events to Loki for Grafana visualization.
+    Failures are swallowed so Loki downtime never breaks the honeypot pipeline."""
+    if not events:
+        return
+    try:
+        # Group events by source_service for Loki stream labels
+        streams: dict[str, list[list[str]]] = {}
+        for event in events:
+            service = event.get("source_service", "unknown")
+            ts_ns = str(int(time.time() * 1_000_000_000))
+            log_line = json.dumps({
+                "event_id": event.get("event_id"),
+                "event_type": event.get("event_type"),
+                "source_ip": event.get("source_ip"),
+                "session_id": event.get("session_id"),
+                "mitre_technique": event.get("mitre_technique"),
+                "timestamp": event.get("timestamp"),
+            })
+            streams.setdefault(service, []).append([ts_ns, log_line])
+
+        payload = {
+            "streams": [
+                {"stream": {"service": service}, "values": values}
+                for service, values in streams.items()
+            ]
+        }
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            LOKI_URL,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[log-shipper] Loki push failed (non-fatal): {e}")
+
+
 def insert_event(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
     """Insert a normalized event into SQLite."""
     conn.execute(
@@ -426,8 +469,11 @@ def main() -> None:
     last_endlessh_poll = time.time()
 
     print(f"[log-shipper] Watching: cowrie ({cowrie_file}), deception-gw ({deception_gw_file}), endlessh (docker logs)")
+    print(f"[log-shipper] Loki push: {LOKI_URL}")
 
     while True:
+        batch: list[dict[str, Any]] = []
+
         # Process Cowrie logs (file tail)
         offset = offsets.get("cowrie", 0)
         lines, new_offset = tail_file(cowrie_file, offset)
@@ -441,6 +487,7 @@ def main() -> None:
                 raw = json.loads(line)
                 event = normalize_cowrie(raw)
                 insert_event(conn, event)
+                batch.append(event)
             except json.JSONDecodeError:
                 print(f"[log-shipper] JSON parse error in cowrie: {line[:100]}")
             except Exception as e:
@@ -459,6 +506,7 @@ def main() -> None:
                 raw = json.loads(line)
                 event = normalize_deception_gw(raw)
                 insert_event(conn, event)
+                batch.append(event)
             except json.JSONDecodeError:
                 print(f"[log-shipper] JSON parse error in deception-gw: {line[:100]}")
             except Exception as e:
@@ -474,9 +522,14 @@ def main() -> None:
                     if event is None:
                         continue
                     insert_event(conn, event)
+                    batch.append(event)
                 except Exception as e:
                     print(f"[log-shipper] Error processing endlessh event: {e}")
             last_endlessh_poll = now
+
+        # Push batch to Loki
+        if batch:
+            push_to_loki(batch)
 
         time.sleep(POLL_INTERVAL)
 

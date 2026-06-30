@@ -306,9 +306,8 @@ def main() -> None:
             write_techniques(conn, all_matches)
             print(f"[mitre-mapper] Cycle {cycle}: mapped {len(unmapped)} events, found {len(all_matches)} technique matches")
 
-            # Update attacker profiles after mapping
-            update_attackers(conn)
-            if cycle % 6 == 0:  # Update attacker profiles every 30 seconds (6 cycles * 5s)
+            # Update attacker profiles every 30 seconds (6 cycles * 5s)
+            if cycle % 6 == 0:
                 update_attackers(conn)
                 print(f"[mitre-mapper] Updated attacker profiles")
         else:
