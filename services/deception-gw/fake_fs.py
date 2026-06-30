@@ -4,6 +4,7 @@ There is no real filesystem access here. The "shell" matches commands against a
 whitelist and returns canned fake output. There is no subprocess, eval, exec,
 os.system, __import__, or compile anywhere in this module.
 """
+import copy
 from typing import Optional
 
 HOSTNAME: str = "corp-webapp-01"
@@ -65,7 +66,7 @@ class WebshellSandbox:
     uploads by one attacker do not leak into another session."""
 
     def __init__(self) -> None:
-        self.fs: dict[str, object] = dict(INITIAL_FS)
+        self.fs: dict[str, object] = copy.deepcopy(INITIAL_FS)
         self.cwd: str = "/var/www/html"
 
     def upload(self, filename: str, content: str) -> str:
