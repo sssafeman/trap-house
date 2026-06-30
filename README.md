@@ -196,7 +196,7 @@ open http://localhost:3000
 # 2. SSH in and clone the repo
 ssh root@your-vps-ip
 apt-get update && apt-get install -y git
-git clone <repo-url> /opt/trap-house
+git clone https://github.com/sssafeman/trap-house /opt/trap-house
 
 # 3. Run host hardening (moves SSH to port 65022, configures firewall, installs Docker)
 cd /opt/trap-house
@@ -219,6 +219,70 @@ ssh -p 65022 -L 8001:localhost:8001 -L 3000:localhost:3000 your_username@your-vp
 #   http://localhost:8001  (SOC Dashboard)
 #   http://localhost:3000  (Grafana)
 ```
+
+## Production Deployment (Oracle Cloud Free Tier)
+
+Oracle Cloud offers a permanently free tier with ARM instances (Ampere A1, up to 24GB RAM). This is sufficient for the full 8-container stack.
+
+### Oracle Cloud Setup
+
+1. Sign up at cloud.oracle.com (requires credit card for verification, not charged)
+
+2. Create a compute instance:
+   - Shape: VM.Standard.A1.Flex (ARM, Ampere A1)
+   - Image: Ubuntu 24.04 (Canonical)
+   - OCPUs: 2, Memory: 8GB (within free tier limits)
+   - Save your SSH private key
+
+3. Open ports in Oracle's Security List (VCN > Security Lists):
+   - Port 22: Endlessh tarpit
+   - Port 2222: Cowrie SSH
+   - Port 2223: Cowrie Telnet
+   - Port 80: Deception-gw HTTP
+   - Port 65022: Host SSH (admin access)
+   Oracle's cloud firewall blocks all ports by default. UFW on the host is not enough.
+
+4. SSH into the instance (Oracle uses `ubuntu` as the default user):
+```bash
+ssh ubuntu@your-oracle-ip
+```
+
+5. Clone and harden:
+```bash
+sudo apt-get update && sudo apt-get install -y git
+git clone https://github.com/sssafeman/trap-house /opt/trap-house
+cd /opt/trap-house
+sudo bash deploy/harden.sh ubuntu
+```
+
+6. Reconnect on the new SSH port:
+```bash
+ssh -p 65022 ubuntu@your-oracle-ip
+```
+
+7. Configure and deploy:
+```bash
+cd /opt/trap-house
+cp .env.hetzner.example .env.hetzner
+# Edit .env.hetzner: set SESSION_SECRET and GRAFANA_ADMIN_PASSWORD
+# Generate SESSION_SECRET: python3 -c "import secrets; print(secrets.token_hex(32))"
+nano .env.hetzner
+bash deploy/deploy.sh
+```
+
+8. Access dashboards via SSH tunnel:
+```bash
+ssh -p 65022 -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
+# Then open:
+#   http://localhost:8001  (SOC Dashboard)
+#   http://localhost:3000  (Grafana)
+```
+
+### Oracle Cloud Notes
+- All Docker images in this project support ARM64 (Ampere A1). No architecture changes needed.
+- Oracle may reclaim idle free tier instances. A honeypot receiving traffic should stay active.
+- Bandwidth limit: 10 TB/month outbound. Honeypot log traffic will not approach this.
+- If Oracle rejects your signup, try a different browser or card. The process is known to be finicky.
 
 ### Production Port Mapping
 
