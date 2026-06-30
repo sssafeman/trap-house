@@ -14,7 +14,7 @@
 services:
   endlessh:
     ports: !override
-      - "22:2222"
+      - "22222:2222"
 
   cowrie:
     ports: !override
@@ -30,12 +30,14 @@ services:
       - "127.0.0.1:8001:8001"
     networks: !override
       - trap-internal
+      - trap-external
 
   grafana:
     ports: !override
       - "127.0.0.1:3000:3000"
     networks: !override
       - trap-internal
+      - trap-external
     environment: !override
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
       - GF_AUTH_ANONYMOUS_ENABLED=false
