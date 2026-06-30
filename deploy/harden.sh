@@ -75,7 +75,8 @@ else
   sed -i "s/^#\?MaxAuthTries .*/MaxAuthTries 3/" "$SSHD_CONFIG"
 fi
 
-systemctl restart sshd
+# Try both service names (Ubuntu 24.04 uses 'ssh', older systems use 'sshd')
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null
 echo "SSH moved to port ${NEW_SSH_PORT}. Root login and password auth disabled."
 
 # 5. Configure fail2ban
