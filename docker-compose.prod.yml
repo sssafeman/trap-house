@@ -26,12 +26,14 @@ services:
       - "80:8000"
 
   frontend:
-    ports: !reset []
+    ports: !override
+      - "127.0.0.1:8001:8001"
     networks: !override
       - trap-internal
 
   grafana:
-    ports: !reset []
+    ports: !override
+      - "127.0.0.1:3000:3000"
     networks: !override
       - trap-internal
     environment: !override
