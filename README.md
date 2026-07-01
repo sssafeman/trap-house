@@ -27,21 +27,21 @@ Most student honeypot projects do one thing: deploy Cowrie, collect some logs, w
               trap-external       |
                     |             |
            +--------+--+--+------+--------+
-           |           |  |              |
-       endlessh    cowrie  deception-gw
-       (tarpit)    (honeypot)  (FastAPI)
-           |           |  |              |
-           +-----+-----+--+--------------+
+           |           |  |               |
+       endlessh       cowrie         deception-gw
+       (tarpit)     (honeypot)        (FastAPI)
+           |           |  |               |
+           +-----+-----+--+---------------+
                  |
           trap-logs (bind mounts)
                  |
          +-------+--------+
-         |               |
+         |                |
     log-shipper      mitre-mapper
-         |               |
-         v               v
-    SQLite DB      techniques table
-    events table   attackers table
+         |                |
+         v                v
+    SQLite DB       techniques table
+    events table    attackers table
          |
     +----+----+
     |         |
