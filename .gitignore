@@ -35,4 +35,5 @@ venv/
 
 # OS
 .DS_Store
-Thumbs.dbdigests/
+Thumbs.db
+digests/
