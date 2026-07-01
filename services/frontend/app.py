@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import urllib.request
+import json as _json
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +68,55 @@ def query_one(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any]:
     """Run a read-only query expected to return a single row."""
     rows = query(sql, params)
     return rows[0] if rows else {}
+
+
+# In-memory geolocation cache: IP -> {lat, lng, country, city} or {} on failure.
+# Avoids re-looking up the same IP on every 10s refresh.
+_geo_cache: dict[str, dict[str, Any]] = {}
+
+
+def geolocate_ip(ip: str) -> dict[str, Any]:
+    """Look up geographic coordinates for an IP address using ip-api.com.
+
+    Free, no API key required, 45 req/min rate limit. Results are cached
+    in memory so repeated lookups for the same IP do not hit the API.
+    Private/internal IPs return empty dict (no geolocation possible).
+    """
+    if not ip:
+        return {}
+
+    # Skip private and loopback addresses.
+    parts = ip.split(".")
+    if len(parts) == 4:
+        try:
+            o = int(parts[0])
+            if o == 10 or o == 127 or (o == 172 and 16 <= int(parts[1]) <= 31) or (o == 192 and int(parts[1]) == 168):
+                return {}
+        except ValueError:
+            return {}
+
+    if ip in _geo_cache:
+        return _geo_cache[ip]
+
+    try:
+        url = f"http://ip-api.com/json/{ip}?fields=status,lat,lon,country,city"
+        req = urllib.request.Request(url, headers={"User-Agent": "trap-house-honeypot/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = _json.loads(resp.read().decode())
+        if data.get("status") == "success":
+            result = {
+                "lat": data.get("lat", 0),
+                "lng": data.get("lon", 0),
+                "country": data.get("country", ""),
+                "city": data.get("city", ""),
+            }
+        else:
+            result = {}
+    except Exception:
+        result = {}
+
+    _geo_cache[ip] = result
+    return result
 
 
 @app.get("/health")
@@ -230,11 +281,10 @@ async def api_session_events(session_id: str) -> JSONResponse:
 
 @app.get("/api/attack-map")
 async def api_attack_map() -> JSONResponse:
-    """Source IPs with attack counts, enriched with risk score and techniques.
+    """Source IPs with attack counts, enriched with risk score, techniques,
+    and real geolocation (lat, lng, country, city) via ip-api.com.
 
-    Geolocation is resolved client-side. In dev the source IPs are internal
-    Docker addresses, so the map clusters; in production these are real
-    attacker IPs and the map shows global attack origins.
+    Geolocation results are cached in memory. Private IPs return empty geo.
     """
     rows = query(
         """
@@ -250,6 +300,13 @@ async def api_attack_map() -> JSONResponse:
         LIMIT 100
         """
     )
+    # Enrich each row with geolocation data.
+    for row in rows:
+        geo = geolocate_ip(row.get("source_ip", ""))
+        row["lat"] = geo.get("lat")
+        row["lng"] = geo.get("lng")
+        row["country"] = geo.get("country", "")
+        row["city"] = geo.get("city", "")
     return JSONResponse(rows)
 
 
