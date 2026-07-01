@@ -3,38 +3,68 @@
 
 {% block content %}
 <section class="stats-bar" id="stats-bar">
-  <div class="stat-card">
+  <div class="stat-card" data-metric="events">
+    <div class="stat-top">
+      <span class="stat-glyph">&#9776;</span>
+      <span class="stat-label">Total Events</span>
+    </div>
     <div class="stat-value" id="stat-events">0</div>
-    <div class="stat-label">Total Events</div>
     <div class="stat-delta" id="delta-events"></div>
+    <div class="stat-spark"></div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card" data-metric="attackers">
+    <div class="stat-top">
+      <span class="stat-glyph">&#9673;</span>
+      <span class="stat-label">Unique IPs</span>
+    </div>
     <div class="stat-value" id="stat-attackers">0</div>
-    <div class="stat-label">Unique IPs</div>
     <div class="stat-delta" id="delta-attackers"></div>
+    <div class="stat-spark"></div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card" data-metric="sessions">
+    <div class="stat-top">
+      <span class="stat-glyph">&#8646;</span>
+      <span class="stat-label">Sessions</span>
+    </div>
     <div class="stat-value" id="stat-sessions">0</div>
-    <div class="stat-label">Sessions</div>
+    <div class="stat-delta stat-delta-static">tracked engagements</div>
+    <div class="stat-spark"></div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card" data-metric="techniques">
+    <div class="stat-top">
+      <span class="stat-glyph">&#9639;</span>
+      <span class="stat-label">MITRE Techniques</span>
+    </div>
     <div class="stat-value" id="stat-techniques">0</div>
-    <div class="stat-label">MITRE Techniques</div>
+    <div class="stat-delta stat-delta-static">ATT&amp;CK observed</div>
+    <div class="stat-spark"></div>
   </div>
 </section>
 
 <section class="grid-main">
   <div class="panel" id="panel-map">
     <div class="panel-head">
-      <h2>Attack Origins</h2>
-      <span class="panel-note">Geo locations based on source IP. Dev mode shows internal Docker IPs.</span>
+      <div class="panel-title">
+        <span class="panel-tick"></span>
+        <h2>Attack Origins</h2>
+      </div>
+      <span class="panel-note">Geo derived from source IP. Dev mode shows internal Docker IPs.</span>
     </div>
     <div id="attack-map" class="map-canvas"></div>
+    <div class="map-legend">
+      <span class="map-legend-item"><span class="map-swatch" style="background:#22c55e"></span>low</span>
+      <span class="map-legend-item"><span class="map-swatch" style="background:#f5d142"></span>elevated</span>
+      <span class="map-legend-item"><span class="map-swatch" style="background:#ff4444"></span>high</span>
+      <span class="map-legend-note">marker size scales with attack volume</span>
+    </div>
   </div>
 
   <div class="panel" id="panel-heatmap">
     <div class="panel-head">
-      <h2>MITRE ATT&amp;CK Heatmap</h2>
+      <div class="panel-title">
+        <span class="panel-tick"></span>
+        <h2>MITRE ATT&amp;CK Heatmap</h2>
+      </div>
       <span class="panel-note" id="heatmap-filter-note">Click a technique to filter the timeline.</span>
     </div>
     <div id="mitre-heatmap" class="heatmap-canvas"></div>
@@ -44,7 +74,11 @@
 <section class="grid-bottom">
   <div class="panel" id="panel-timeline">
     <div class="panel-head">
-      <h2>Attack Timeline</h2>
+      <div class="panel-title">
+        <span class="panel-tick"></span>
+        <h2>Attack Timeline</h2>
+        <span class="panel-count" id="timeline-count">0</span>
+      </div>
       <div class="filter-bar" id="timeline-filters">
         <select id="filter-service" class="filter-input">
           <option value="">all services</option>
@@ -58,6 +92,18 @@
         <button id="filter-clear" class="filter-btn">clear</button>
       </div>
     </div>
+    <div class="timeline-legend">
+      <span class="tl-legend-group">
+        <span class="tl-legend-item"><span class="tl-dot svc-cowrie"></span>cowrie</span>
+        <span class="tl-legend-item"><span class="tl-dot svc-deception-gw"></span>deception-gw</span>
+        <span class="tl-legend-item"><span class="tl-dot svc-endlessh"></span>endlessh</span>
+      </span>
+      <span class="tl-legend-group">
+        <span class="tl-legend-item"><span class="tl-dot tl-size-lg"></span>high</span>
+        <span class="tl-legend-item"><span class="tl-dot tl-size-md"></span>medium</span>
+        <span class="tl-legend-item"><span class="tl-dot tl-size-sm"></span>low</span>
+      </span>
+    </div>
     <div id="timeline" class="timeline-canvas"></div>
     <div id="timeline-axis" class="timeline-axis"></div>
     <div id="timeline-detail" class="timeline-detail">Hover a dot for event details.</div>
@@ -65,7 +111,10 @@
 
   <div class="panel" id="panel-replay">
     <div class="panel-head">
-      <h2>Session Replay</h2>
+      <div class="panel-title">
+        <span class="panel-tick"></span>
+        <h2>Session Replay</h2>
+      </div>
       <select id="session-select" class="filter-input">
         <option value="">select a session</option>
       </select>
@@ -78,8 +127,20 @@
 
 <section class="panel" id="panel-attackers">
   <div class="panel-head">
-    <h2>Top Attackers</h2>
+    <div class="panel-title">
+      <span class="panel-tick"></span>
+      <h2>Top Attackers</h2>
+      <span class="panel-count" id="attacker-count">0</span>
+    </div>
     <span class="panel-note">Ranked by risk score. Click an IP to filter the timeline.</span>
+  </div>
+  <div class="attacker-head">
+    <span>Source IP</span>
+    <span>Risk</span>
+    <span>Events</span>
+    <span>Sessions</span>
+    <span>Top User</span>
+    <span>Intel</span>
   </div>
   <div id="attacker-list" class="attacker-list"></div>
 </section>

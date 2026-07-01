@@ -1,6 +1,6 @@
 // Dashboard orchestrator. Wires the stats bar, attack map, MITRE heatmap,
-// timeline, and session replay together and drives the 10 second auto-refresh
-// polling loop. All other modules attach to window.TrapHouse.
+// timeline, session replay, and top attackers together. Drives the 10 second
+// auto-refresh polling loop and the nav bar clock and progress bar.
 
 (function () {
   const REFRESH_SECONDS = 10;
@@ -15,6 +15,31 @@
   function setText(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s);
+  }
+
+  // Nav bar clock. Updates every second.
+  function updateClock() {
+    const el = document.getElementById("nav-clock");
+    if (!el) return;
+    const now = new Date();
+    el.textContent = now.toLocaleTimeString();
+  }
+
+  // Refresh progress bar. Fills over the refresh interval, resets on poll.
+  function updateProgressBar() {
+    const fill = document.getElementById("refresh-fill");
+    if (!fill) return;
+    const pct = ((REFRESH_SECONDS - countdown) / REFRESH_SECONDS) * 100;
+    fill.style.width = pct + "%";
   }
 
   function markUpdated(ok) {
@@ -35,20 +60,20 @@
     setText("stat-sessions", (s.sessions || 0).toLocaleString());
     setText("stat-techniques", (s.techniques || 0).toLocaleString());
 
-    // 24h trend deltas
+    // 24h trend deltas with chip styling.
     const dEvents = document.getElementById("delta-events");
     if (dEvents) {
       const n = s.events_24h || 0;
       dEvents.innerHTML = n > 0
-        ? '<span class="delta-up">+' + n + '</span> in last 24h'
-        : '<span class="delta-flat">0 in last 24h</span>';
+        ? '<span class="delta-chip delta-up">+' + n + "</span> in last 24h"
+        : '<span class="delta-chip delta-flat">0</span> in last 24h';
     }
     const dAttackers = document.getElementById("delta-attackers");
     if (dAttackers) {
       const n = s.attackers_24h || 0;
       dAttackers.innerHTML = n > 0
-        ? '<span class="delta-up">+' + n + '</span> new in 24h'
-        : '<span class="delta-flat">0 new in 24h</span>';
+        ? '<span class="delta-chip delta-up">+' + n + "</span> new in 24h"
+        : '<span class="delta-chip delta-flat">0</span> new in 24h';
     }
   }
 
@@ -94,31 +119,75 @@
     return "risk-low";
   }
 
+  function parseTechCount(mt) {
+    if (!mt) return 0;
+    try {
+      const arr = JSON.parse(mt);
+      return Array.isArray(arr) ? arr.length : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function parseTools(td) {
+    if (!td) return [];
+    try {
+      const arr = JSON.parse(td);
+      return Array.isArray(arr) ? arr.filter((t) => t) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
   async function refreshAttackers() {
     const rows = await fetchJSON("/api/attackers");
     const host = document.getElementById("attacker-list");
     if (!host) return;
+    const countEl = document.getElementById("attacker-count");
+    if (countEl) countEl.textContent = rows.length;
+
     if (!rows || rows.length === 0) {
       host.innerHTML = '<div class="replay-empty">No attacker profiles yet.</div>';
       return;
     }
     const top = rows.slice(0, 10);
+    const maxRisk = Math.max.apply(null, top.map((a) => a.risk_score || 0));
     let html = "";
-    top.forEach((a) => {
+    top.forEach((a, i) => {
       const ip = a.source_ip || "?";
       const risk = a.risk_score || 0;
       const events = a.event_count || 0;
       const sessions = a.session_count || 0;
       const user = a.top_username || "";
-      const techCount = a.mitre_techniques
-        ? (a.mitre_techniques.match(/"/g) || []).length / 2
-        : 0;
+      const techCount = parseTechCount(a.mitre_techniques);
+      const tools = parseTools(a.tools_detected);
+      const rc = riskClass(risk);
+      const barPct = maxRisk > 0 ? Math.round((risk / maxRisk) * 100) : 0;
+      const userHtml = user
+        ? '<span class="attacker-user">' + escapeHtml(user) + "</span>"
+        : '<span class="attacker-user attacker-user-empty">none</span>';
+
+      let intelHtml = "";
+      if (techCount > 0) {
+        intelHtml += '<span class="intel-badge intel-mitre">' + techCount + " MITRE</span>";
+      }
+      tools.forEach((t) => {
+        intelHtml += '<span class="intel-badge intel-tool">' + escapeHtml(t) + "</span>";
+      });
+      if (!intelHtml) intelHtml = '<span class="intel-badge">none</span>';
+
       html +=
         '<div class="attacker-row" data-ip="' + escapeAttr(ip) + '">' +
-        '<span class="attacker-ip">' + escapeHtml(ip) + "</span>" +
-        '<span class="attacker-meta">' + events + " ev / " + sessions + " sess / " + Math.round(techCount) + " MITRE</span>" +
-        '<span class="attacker-user">' + escapeHtml(user) + "</span>" +
-        '<span class="attacker-risk ' + riskClass(risk) + '">' + risk.toFixed(1) + "</span>" +
+        '<span><span class="attacker-rank">' + (i + 1) + "</span>" +
+        '<span class="attacker-ip">' + escapeHtml(ip) + "</span></span>" +
+        '<span class="attacker-riskcell">' +
+        '<span class="attacker-risk ' + rc + '">' + risk.toFixed(1) + "</span>" +
+        '<span class="risk-bar"><span class="risk-bar-fill ' + rc + '" style="width:' + barPct + '%"></span></span>' +
+        "</span>" +
+        '<span class="attacker-num">' + events + "</span>" +
+        '<span class="attacker-num">' + sessions + "</span>" +
+        userHtml +
+        '<span class="attacker-intel">' + intelHtml + "</span>" +
         "</div>";
     });
     host.innerHTML = html;
@@ -142,15 +211,6 @@
     }
     const events = await fetchJSON("/api/sessions/" + encodeURIComponent(sessionId) + "/events");
     if (window.TrapHouse.replay) window.TrapHouse.replay.renderReplay(events);
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-  function escapeAttr(s) {
-    return escapeHtml(s);
   }
 
   async function refreshAll() {
@@ -177,6 +237,7 @@
       refreshAll();
     }
     setText("refresh-countdown", countdown);
+    updateProgressBar();
   }
 
   function init() {
@@ -190,6 +251,8 @@
       });
     }
 
+    updateClock();
+    setInterval(updateClock, 1000);
     refreshAll();
     setInterval(tickCountdown, 1000);
   }
