@@ -1,6 +1,6 @@
 // MITRE ATT&CK heatmap. Rows are tactics, cells are techniques. Cell color
-// intensity scales with event frequency. Clicking a cell filters the timeline
-// to that technique.
+// intensity scales with event frequency. The count sits in its own pill beside
+// the technique ID. Clicking a cell filters the timeline to that technique.
 
 window.TrapHouse = window.TrapHouse || {};
 
@@ -30,7 +30,7 @@ window.TrapHouse = window.TrapHouse || {};
   // Map a 0..1 intensity onto the cyan accent so busier techniques glow brighter.
   function cellStyle(count, maxCount) {
     const t = maxCount > 0 ? count / maxCount : 0;
-    const alpha = 0.12 + t * 0.78;
+    const alpha = 0.1 + t * 0.6;
     return "background: rgba(0, 212, 255, " + alpha.toFixed(2) + ");";
   }
 
@@ -68,6 +68,7 @@ window.TrapHouse = window.TrapHouse || {};
       const cells = byTactic[tactic]
         .slice()
         .sort((a, b) => b.count - a.count);
+      const tacticTotal = cells.reduce((sum, c) => sum + (c.count || 0), 0);
       let cellsHtml = "";
       cells.forEach((c) => {
         const tid = c.technique_id || "";
@@ -78,13 +79,16 @@ window.TrapHouse = window.TrapHouse || {};
           'style="' + cellStyle(c.count, maxCount) + '" ' +
           'data-technique="' + escapeHtml(tid) + '" ' +
           'title="' + escapeHtml(label) + ' (' + c.count + ' events)">' +
-          escapeHtml(tid) +
+          "<span>" + escapeHtml(tid) + "</span>" +
           '<span class="cell-count">' + c.count + "</span>" +
           "</div>";
       });
       html +=
         '<div class="heatmap-tactic-row">' +
-        '<div class="heatmap-tactic-label">' + escapeHtml(tactic.replace(/-/g, " ")) + "</div>" +
+        '<div class="heatmap-tactic-label">' +
+          "<span>" + escapeHtml(tactic.replace(/-/g, " ")) + "</span>" +
+          '<span class="heatmap-tactic-count">' + cells.length + " tech / " + tacticTotal + " ev</span>" +
+        "</div>" +
         '<div class="heatmap-cells">' + cellsHtml + "</div>" +
         "</div>";
     });

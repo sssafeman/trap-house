@@ -12,15 +12,28 @@
   <header class="topnav">
     <div class="brand">
       <span class="brand-mark">&#9608;</span>
-      <span class="brand-name">TRAP HOUSE</span>
-      <span class="brand-sub">SOC / Threat Intelligence</span>
+      <div class="brand-text">
+        <span class="brand-name">TRAP HOUSE</span>
+        <span class="brand-sub">SOC / THREAT INTELLIGENCE</span>
+      </div>
+      <span class="brand-tag">DECEPTION GRID</span>
     </div>
-    <div class="nav-status">
-      <span class="status-dot" id="live-dot"></span>
-      <span id="live-label">LIVE</span>
-      <span class="refresh-meta">refresh <span id="refresh-countdown">10</span>s</span>
-      <span class="refresh-meta">updated <span id="last-updated">never</span></span>
+
+    <div class="nav-right">
+      <div class="nav-clock">
+        <span class="nav-clock-time" id="nav-clock">00:00:00</span>
+        <span class="nav-clock-zone" id="nav-zone">LOCAL</span>
+      </div>
+      <div class="nav-status" title="Live polling status">
+        <span class="status-dot" id="live-dot"></span>
+        <span id="live-label">LIVE</span>
+      </div>
+      <div class="nav-refresh">
+        <span class="refresh-meta">SYNC <span id="refresh-countdown">10</span>S</span>
+        <span class="refresh-meta refresh-updated">UPD <span id="last-updated">never</span></span>
+      </div>
     </div>
+    <div class="refresh-track"><div class="refresh-fill" id="refresh-fill"></div></div>
   </header>
 
   <main class="content">
@@ -28,7 +41,10 @@
   </main>
 
   <footer class="footer">
+    <span class="footer-mark">&#9608;</span>
     <span>Trap House deception honeypot. Detection and intelligence only. No hack-back.</span>
+    <span class="footer-sep">/</span>
+    <span>Norway. Legal posture: defensive deception, detection, delay.</span>
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

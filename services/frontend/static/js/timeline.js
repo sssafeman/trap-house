@@ -1,7 +1,7 @@
 // Attack timeline. Horizontal scrolling row of colored dots, one per recent
-// event, colored by source service. Hover shows details. A filter bar narrows
-// by service, event type, and source IP. The MITRE heatmap can also push a
-// technique filter in via filterByTechnique.
+// event, colored by source service and sized by severity. Hover shows details.
+// A filter bar narrows by service, event type, and source IP. The MITRE heatmap
+// can also push a technique filter in via filterByTechnique.
 
 window.TrapHouse = window.TrapHouse || {};
 
@@ -82,12 +82,18 @@ window.TrapHouse = window.TrapHouse || {};
     el.innerHTML = html;
   }
 
+  function setCount(n) {
+    const el = document.getElementById("timeline-count");
+    if (el) el.textContent = n;
+  }
+
   function render() {
     const host = document.getElementById("timeline");
     if (!host) return;
     // API returns newest first. Show oldest -> newest left to right so new
     // events arrive on the right edge.
     const events = applyFilters(allEvents).slice().reverse();
+    setCount(events.length);
     if (events.length === 0) {
       host.innerHTML = '<span class="panel-note">No events match the current filters.</span>';
       const axis = document.getElementById("timeline-axis");
@@ -101,7 +107,7 @@ window.TrapHouse = window.TrapHouse || {};
     });
     host.innerHTML = html;
 
-    // Time axis: first, middle, last timestamps
+    // Time axis: first, middle, last timestamps.
     const axis = document.getElementById("timeline-axis");
     if (axis && events.length > 0) {
       const first = events[0];
@@ -127,18 +133,24 @@ window.TrapHouse = window.TrapHouse || {};
     host.scrollLeft = host.scrollWidth;
   }
 
+  function field(key, value, cls) {
+    if (!value) return "";
+    const v = cls ? '<span class="' + cls + '">' + escapeHtml(value) + "</span>" : escapeHtml(value);
+    return '<span class="td-key">' + key + ":</span> " + v + "   ";
+  }
+
   function showDetail(ev) {
     const host = document.getElementById("timeline-detail");
     if (!host || !ev) return;
-    const parts = [
-      ev.timestamp || "",
-      ev.source_service || "",
-      ev.event_type || "",
-      ev.source_ip || "",
-    ];
-    if (ev.mitre_technique) parts.push("MITRE " + ev.mitre_technique);
-    if (ev.command) parts.push("cmd: " + ev.command);
-    host.textContent = parts.filter(Boolean).join("  |  ");
+    let html = "";
+    html += field("time", ev.timestamp);
+    html += field("svc", ev.source_service);
+    html += field("type", ev.event_type);
+    html += field("src", ev.source_ip);
+    if (ev.username) html += field("user", ev.username);
+    if (ev.mitre_technique) html += field("mitre", ev.mitre_technique, "td-tech");
+    if (ev.command) html += field("cmd", ev.command, "td-cmd");
+    host.innerHTML = html;
   }
 
   function setEvents(events) {
