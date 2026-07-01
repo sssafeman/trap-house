@@ -82,7 +82,11 @@ async def dashboard(request: Request) -> HTMLResponse:
 
 @app.get("/api/stats")
 async def api_stats() -> JSONResponse:
-    """Summary counts for the top stats bar: events, attackers, sessions, techniques."""
+    """Summary counts for the top stats bar: events, attackers, sessions, techniques.
+
+    Includes 24h deltas for events and attackers so the dashboard can show
+    trend indicators without a separate request.
+    """
     stats = query_one(
         """
         SELECT
@@ -91,11 +95,19 @@ async def api_stats() -> JSONResponse:
                 WHERE source_ip IS NOT NULL AND source_ip != '') AS attackers,
             (SELECT COUNT(DISTINCT session_id) FROM events
                 WHERE session_id IS NOT NULL AND session_id != '') AS sessions,
-            (SELECT COUNT(DISTINCT technique_id) FROM techniques) AS techniques
+            (SELECT COUNT(DISTINCT technique_id) FROM techniques) AS techniques,
+            (SELECT COUNT(*) FROM events
+                WHERE timestamp >= datetime('now', '-24 hours')) AS events_24h,
+            (SELECT COUNT(DISTINCT source_ip) FROM events
+                WHERE source_ip IS NOT NULL AND source_ip != ''
+                AND timestamp >= datetime('now', '-24 hours')) AS attackers_24h
         """
     )
     if not stats:
-        stats = {"events": 0, "attackers": 0, "sessions": 0, "techniques": 0}
+        stats = {
+            "events": 0, "attackers": 0, "sessions": 0, "techniques": 0,
+            "events_24h": 0, "attackers_24h": 0,
+        }
     return JSONResponse(stats)
 
 

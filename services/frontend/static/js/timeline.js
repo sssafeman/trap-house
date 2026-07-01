@@ -23,6 +23,13 @@ window.TrapHouse = window.TrapHouse || {};
     return "svc-other";
   }
 
+  function severityClass(ev) {
+    const t = (ev.event_type || "").toLowerCase();
+    if (t === "auth_success" || t === "command_exec" || t === "proxy_data" || t === "proxy_request") return "sev-high";
+    if (t === "client_version" || t === "client_kex" || t === "tarpit_connect") return "sev-low";
+    return "sev-med";
+  }
+
   function currentFilters() {
     return {
       service: valueOf("filter-service"),
@@ -83,14 +90,32 @@ window.TrapHouse = window.TrapHouse || {};
     const events = applyFilters(allEvents).slice().reverse();
     if (events.length === 0) {
       host.innerHTML = '<span class="panel-note">No events match the current filters.</span>';
+      const axis = document.getElementById("timeline-axis");
+      if (axis) axis.innerHTML = "";
       return;
     }
     let html = "";
     events.forEach((ev, i) => {
       html +=
-        '<div class="timeline-dot ' + serviceClass(ev.source_service) + '" data-idx="' + i + '"></div>';
+        '<div class="timeline-dot ' + serviceClass(ev.source_service) + " " + severityClass(ev) + '" data-idx="' + i + '"></div>';
     });
     host.innerHTML = html;
+
+    // Time axis: first, middle, last timestamps
+    const axis = document.getElementById("timeline-axis");
+    if (axis && events.length > 0) {
+      const first = events[0];
+      const last = events[events.length - 1];
+      const mid = events[Math.floor(events.length / 2)];
+      const fmt = (ts) => {
+        if (!ts) return "";
+        return ts.slice(11, 19);
+      };
+      axis.innerHTML =
+        "<span>" + escapeHtml(fmt(first.timestamp)) + "</span>" +
+        "<span>" + escapeHtml(fmt(mid.timestamp)) + "</span>" +
+        "<span>" + escapeHtml(fmt(last.timestamp)) + "</span>";
+    }
 
     const ordered = events;
     host.querySelectorAll(".timeline-dot").forEach((dot) => {
@@ -120,6 +145,10 @@ window.TrapHouse = window.TrapHouse || {};
     allEvents = Array.isArray(events) ? events : [];
     rebuildFilterOptions();
     render();
+  }
+
+  function getAllEvents() {
+    return allEvents;
   }
 
   function filterByTechnique(techniqueId) {
@@ -153,5 +182,5 @@ window.TrapHouse = window.TrapHouse || {};
     }
   }
 
-  window.TrapHouse.timeline = { setEvents, filterByTechnique, initFilters };
+  window.TrapHouse.timeline = { setEvents, getAllEvents, filterByTechnique, initFilters };
 })();

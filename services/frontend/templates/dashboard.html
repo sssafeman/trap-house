@@ -6,10 +6,12 @@
   <div class="stat-card">
     <div class="stat-value" id="stat-events">0</div>
     <div class="stat-label">Total Events</div>
+    <div class="stat-delta" id="delta-events"></div>
   </div>
   <div class="stat-card">
     <div class="stat-value" id="stat-attackers">0</div>
     <div class="stat-label">Unique IPs</div>
+    <div class="stat-delta" id="delta-attackers"></div>
   </div>
   <div class="stat-card">
     <div class="stat-value" id="stat-sessions">0</div>
@@ -57,6 +59,7 @@
       </div>
     </div>
     <div id="timeline" class="timeline-canvas"></div>
+    <div id="timeline-axis" class="timeline-axis"></div>
     <div id="timeline-detail" class="timeline-detail">Hover a dot for event details.</div>
   </div>
 
@@ -71,6 +74,14 @@
       <div class="replay-empty">Select a session to replay attacker progression through the deception layers.</div>
     </div>
   </div>
+</section>
+
+<section class="panel" id="panel-attackers">
+  <div class="panel-head">
+    <h2>Top Attackers</h2>
+    <span class="panel-note">Ranked by risk score. Click an IP to filter the timeline.</span>
+  </div>
+  <div id="attacker-list" class="attacker-list"></div>
 </section>
 {% endblock %}
 

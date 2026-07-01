@@ -34,6 +34,22 @@
     setText("stat-attackers", (s.attackers || 0).toLocaleString());
     setText("stat-sessions", (s.sessions || 0).toLocaleString());
     setText("stat-techniques", (s.techniques || 0).toLocaleString());
+
+    // 24h trend deltas
+    const dEvents = document.getElementById("delta-events");
+    if (dEvents) {
+      const n = s.events_24h || 0;
+      dEvents.innerHTML = n > 0
+        ? '<span class="delta-up">+' + n + '</span> in last 24h'
+        : '<span class="delta-flat">0 in last 24h</span>';
+    }
+    const dAttackers = document.getElementById("delta-attackers");
+    if (dAttackers) {
+      const n = s.attackers_24h || 0;
+      dAttackers.innerHTML = n > 0
+        ? '<span class="delta-up">+' + n + '</span> new in 24h'
+        : '<span class="delta-flat">0 new in 24h</span>';
+    }
   }
 
   async function refreshMap() {
@@ -72,6 +88,53 @@
     select.innerHTML = html;
   }
 
+  function riskClass(score) {
+    if (score >= 18) return "risk-high";
+    if (score >= 10) return "risk-med";
+    return "risk-low";
+  }
+
+  async function refreshAttackers() {
+    const rows = await fetchJSON("/api/attackers");
+    const host = document.getElementById("attacker-list");
+    if (!host) return;
+    if (!rows || rows.length === 0) {
+      host.innerHTML = '<div class="replay-empty">No attacker profiles yet.</div>';
+      return;
+    }
+    const top = rows.slice(0, 10);
+    let html = "";
+    top.forEach((a) => {
+      const ip = a.source_ip || "?";
+      const risk = a.risk_score || 0;
+      const events = a.event_count || 0;
+      const sessions = a.session_count || 0;
+      const user = a.top_username || "";
+      const techCount = a.mitre_techniques
+        ? (a.mitre_techniques.match(/"/g) || []).length / 2
+        : 0;
+      html +=
+        '<div class="attacker-row" data-ip="' + escapeAttr(ip) + '">' +
+        '<span class="attacker-ip">' + escapeHtml(ip) + "</span>" +
+        '<span class="attacker-meta">' + events + " ev / " + sessions + " sess / " + Math.round(techCount) + " MITRE</span>" +
+        '<span class="attacker-user">' + escapeHtml(user) + "</span>" +
+        '<span class="attacker-risk ' + riskClass(risk) + '">' + risk.toFixed(1) + "</span>" +
+        "</div>";
+    });
+    host.innerHTML = html;
+
+    host.querySelectorAll(".attacker-row").forEach((row) => {
+      row.addEventListener("click", function () {
+        const ip = this.getAttribute("data-ip");
+        const filter = document.getElementById("filter-sourceip");
+        if (filter) {
+          filter.value = ip;
+          filter.dispatchEvent(new Event("change"));
+        }
+      });
+    });
+  }
+
   async function loadSession(sessionId) {
     if (!sessionId) {
       if (window.TrapHouse.replay) window.TrapHouse.replay.showEmpty();
@@ -98,6 +161,7 @@
         refreshHeatmap(),
         refreshTimeline(),
         refreshSessions(),
+        refreshAttackers(),
       ]);
       markUpdated(true);
     } catch (err) {
