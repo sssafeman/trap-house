@@ -348,9 +348,22 @@ This project was built in 5 phases, each producing a deployable artifact:
 2. **Phase 2**: Deception middleware (FastAPI 5-layer maze, sandboxed webshell, SQL injection)
 3. **Phase 3**: MITRE mapper with regex patterns and attacker profiling
 4. **Phase 4**: SOC dashboard with Leaflet map, MITRE heatmap, session replay, timeline, Grafana/Loki
-5. **Phase 5**: Hetzner deployment config, host hardening, portfolio writeup
+5. **Phase 5**: Production deployment, host hardening, portfolio writeup
 
 Each phase was verified before moving to the next. The verify.sh script runs 8 automated checks against the running stack.
+
+## Daily Digest
+
+A script-only cron job pulls honeypot stats daily and saves a structured markdown digest:
+
+```bash
+# Run manually
+bash scripts/digest.sh
+
+# Output: digests/YYYY-MM-DD.md
+```
+
+The digest includes total events, unique IPs, 24h deltas, top attackers by risk score, MITRE technique counts, and the last 10 events. Useful for tracking attack growth over time and building portfolio data.
 
 ## License
 
