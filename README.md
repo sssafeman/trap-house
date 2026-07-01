@@ -188,37 +188,72 @@ open http://localhost:8001
 open http://localhost:3000
 ```
 
-## Production Deployment (Hetzner)
+## Production Deployment (DigitalOcean, GitHub Student Pack)
+
+Recommended path for students. $200 credit covers 6+ months of a $32/mo droplet. You only need 2 to 3 weeks of data collection.
 
 ```bash
-# 1. Provision a Hetzner VPS (Ubuntu 24.04, CX22 or larger)
+# 1. Create droplet: Frankfurt, Ubuntu 24.04, $32/mo Premium Intel (2 vCPU, 4GB RAM)
+#    Add SSH key at creation. Skip backups, managed DB, extra volume.
 
-# 2. SSH in and clone the repo
+# 2. SSH in, wait for cloud-init, clone repo
 ssh root@your-vps-ip
+cloud-init status --wait
 apt-get update && apt-get install -y git
 git clone https://github.com/sssafeman/trap-house /opt/trap-house
 
-# 3. Run host hardening (moves SSH to port 65022, configures firewall, installs Docker)
+# 3. Create non-root user with passwordless sudo and your SSH key
+useradd -m -s /bin/bash -G sudo your_username
+mkdir -p /home/your_username/.ssh
+cat /root/.ssh/authorized_keys > /home/your_username/.ssh/authorized_keys
+chown -R your_username:your_username /home/your_username/.ssh
+chmod 700 /home/your_username/.ssh && chmod 600 /home/your_username/.ssh/authorized_keys
+echo "your_username ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/your_username
+
+# 4. Run host hardening (firewall, fail2ban, Docker, unattended upgrades)
 cd /opt/trap-house
 bash deploy/harden.sh your_username
 
-# 4. Reconnect on the new SSH port
-ssh -p 65022 your_username@your-vps-ip
+# 5. Test SSH on port 22 in a SECOND terminal before closing this one
+ssh your_username@your-vps-ip
 
-# 5. Configure production environment
+# 6. Configure production environment
 cp .env.hetzner.example .env.hetzner
-# Edit .env.hetzner: set SESSION_SECRET and GRAFANA_ADMIN_PASSWORD
+# Edit .env.hetzner:
+#   SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+#   GRAFANA_ADMIN_PASSWORD=<your password>
+#   DOCKER_GID=$(getent group docker | cut -d: -f3)
 nano .env.hetzner
 
-# 6. Deploy
-bash deploy/deploy.sh
+# 7. Pre-create data directories with correct ownership
+mkdir -p data/logs/cowrie data/logs/deception-gw data/db data/loki data/grafana
+chown -R 999:999 data/logs/cowrie
+chown -R 1000:1000 data/logs/deception-gw data/db
+chown -R 10001:10001 data/loki
+chown -R 472:472 data/grafana
+chmod -R a+rX config/grafana/provisioning
 
-# 7. Access internal dashboards via SSH tunnel
-ssh -p 65022 -L 8001:localhost:8001 -L 3000:localhost:3000 your_username@your-vps-ip
+# 8. Deploy
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d
+
+# 9. Access dashboards via SSH tunnel
+ssh -L 8001:localhost:8001 -L 3000:localhost:3000 your_username@your-vps-ip
 # Then open:
 #   http://localhost:8001  (SOC Dashboard)
-#   http://localhost:3000  (Grafana)
+#   http://localhost:3000  (Grafana, login: admin / your GRAFANA_ADMIN_PASSWORD)
 ```
+
+### Production Port Mapping (deployed layout)
+
+| Port | Service | Exposure |
+|------|---------|----------|
+| 22 | Host SSH (admin, key-only, root disabled) | External |
+| 80 | Deception-gw (fake web app) | External |
+| 2222 | Cowrie SSH honeypot | External |
+| 2223 | Cowrie Telnet honeypot | External |
+| 22222 | Endlessh tarpit | External |
+| 3000 | Grafana | Loopback only (SSH tunnel) |
+| 8001 | SOC Dashboard | Loopback only (SSH tunnel) |
 
 ## Production Deployment (Oracle Cloud Free Tier)
 
@@ -235,11 +270,11 @@ Oracle Cloud offers a permanently free tier with ARM instances (Ampere A1, up to
    - Save your SSH private key
 
 3. Open ports in Oracle's Security List (VCN > Security Lists):
-   - Port 22: Endlessh tarpit
+   - Port 22: Host SSH (admin access, key-only)
+   - Port 80: Deception-gw HTTP
    - Port 2222: Cowrie SSH
    - Port 2223: Cowrie Telnet
-   - Port 80: Deception-gw HTTP
-   - Port 65022: Host SSH (admin access)
+   - Port 22222: Endlessh tarpit
    Oracle's cloud firewall blocks all ports by default. UFW on the host is not enough.
 
 4. SSH into the instance (Oracle uses `ubuntu` as the default user):
@@ -255,9 +290,9 @@ cd /opt/trap-house
 sudo bash deploy/harden.sh ubuntu
 ```
 
-6. Reconnect on the new SSH port:
+6. Reconnect after hardening (admin SSH stays on port 22 unless you changed it):
 ```bash
-ssh -p 65022 ubuntu@your-oracle-ip
+ssh ubuntu@your-oracle-ip
 ```
 
 7. Configure and deploy:
@@ -272,7 +307,7 @@ bash deploy/deploy.sh
 
 8. Access dashboards via SSH tunnel:
 ```bash
-ssh -p 65022 -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
+ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 # Then open:
 #   http://localhost:8001  (SOC Dashboard)
 #   http://localhost:3000  (Grafana)
@@ -283,18 +318,6 @@ ssh -p 65022 -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 - Oracle may reclaim idle free tier instances. A honeypot receiving traffic should stay active.
 - Bandwidth limit: 10 TB/month outbound. Honeypot log traffic will not approach this.
 - If Oracle rejects your signup, try a different browser or card. The process is known to be finicky.
-
-### Production Port Mapping
-
-| Port | Service | Exposure |
-|------|---------|----------|
-| 22 | Endlessh tarpit | External |
-| 2222 | Cowrie SSH honeypot | External |
-| 2223 | Cowrie Telnet honeypot | External |
-| 80 | Deception-gw (fake web app) | External |
-| 65022 | Host SSH | External (moved from 22) |
-| 3000 | Grafana | Internal (SSH tunnel) |
-| 8001 | SOC Dashboard | Internal (SSH tunnel) |
 
 ## Security Posture
 
@@ -308,11 +331,11 @@ ssh -p 65022 -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 - Webshell sandbox is pure in-memory dict lookup, no real execution
 
 ### Host Security (Production)
-- UFW firewall: only honeypot ports and host SSH open
-- SSH moved to port 65022, root login disabled, password auth disabled
+- UFW firewall: only honeypot ports (80, 2222, 2223, 22222) and host SSH (22) open
+- SSH on port 22, root login disabled, password auth disabled, key-only
 - fail2ban on SSH (3 retries, 2 hour ban)
 - Unattended security upgrades enabled
-- Grafana and frontend accessible only via SSH tunnel
+- Grafana and frontend accessible only via SSH tunnel (bound to 127.0.0.1)
 
 ### Legal
 Norway. Detection and intelligence only. No hack-back, no offensive capabilities. See [LEGAL.md](LEGAL.md).
