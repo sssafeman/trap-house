@@ -37,6 +37,14 @@ window.TrapHouse = window.TrapHouse || {};
     { layer: "config", color: "var(--layer-config)", label: "Config" },
   ];
 
+  const LAYER_LABEL = {
+    ssh: "SSH",
+    web: "Web",
+    sqli: "SQLi",
+    shell: "Shell",
+    config: "Config",
+  };
+
   function legendHtml() {
     let h = '<div class="layer-legend">';
     LEGEND.forEach((l) => {
@@ -47,6 +55,16 @@ window.TrapHouse = window.TrapHouse || {};
     return h + "</div>";
   }
 
+  // Summary strip: how deep the attacker got, how many events, how many layers.
+  function summaryHtml(events, layers) {
+    const deepest = LEGEND.filter((l) => layers.has(l.layer)).map((l) => l.label).pop() || "none";
+    let chips =
+      '<span class="replay-chip">events <b>' + events.length + "</b></span>" +
+      '<span class="replay-chip">layers <b>' + layers.size + "</b></span>" +
+      '<span class="replay-chip">deepest <b>' + escapeHtml(deepest) + "</b></span>";
+    return '<div class="replay-summary">' + chips + "</div>";
+  }
+
   function renderReplay(events) {
     const host = document.getElementById("session-replay");
     if (!host) return;
@@ -55,13 +73,16 @@ window.TrapHouse = window.TrapHouse || {};
       return;
     }
 
-    let html = legendHtml();
+    const layers = new Set();
+    events.forEach((ev) => layers.add(layerFor(ev)));
+
+    let html = summaryHtml(events, layers) + legendHtml();
     events.forEach((ev) => {
       const layer = layerFor(ev);
       const time = ev.timestamp ? escapeHtml(ev.timestamp) : "";
       const type = escapeHtml(ev.event_type || "event");
       const svc = escapeHtml(ev.source_service || "");
-      const user = ev.username ? '<div class="replay-meta">user: ' + escapeHtml(ev.username) + "</div>" : "";
+      const user = ev.username ? '<div class="replay-meta">user: <b>' + escapeHtml(ev.username) + "</b></div>" : "";
       const cmd = ev.command ? '<div class="replay-cmd">' + escapeHtml(ev.command) + "</div>" : "";
       const tech = ev.mitre_technique
         ? '<div class="replay-tech">MITRE: ' + escapeHtml(ev.mitre_technique) + "</div>"
@@ -69,7 +90,10 @@ window.TrapHouse = window.TrapHouse || {};
       html +=
         '<div class="replay-step layer-' + layer + '">' +
         '<div class="replay-card">' +
-        '<div class="replay-time">' + time + " &middot; " + svc + "</div>" +
+        '<div class="replay-card-head">' +
+        '<span class="replay-time">' + time + " &middot; " + svc + "</span>" +
+        '<span class="replay-layer-tag layer-' + layer + '">' + LAYER_LABEL[layer] + "</span>" +
+        "</div>" +
         '<div class="replay-type">' + type + "</div>" +
         user +
         cmd +
