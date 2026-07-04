@@ -18,9 +18,12 @@ to /cowrie/cowrie-git/var/fs.custom.pickle.
 The cowrie.cfg points [shell] filesystem to this custom pickle.
 """
 
+import calendar
 import os
 import pickle
 import sys
+import time
+from typing import Any, Optional
 
 # Entry list field indices (must match cowrie.shell.fs A_* constants exactly).
 # Entry format: [name, type, uid, gid, size, mode, ctime, contents, target, realfile]
@@ -65,11 +68,23 @@ BUNDLED_PICKLE = "/cowrie/cowrie-git/src/cowrie/data/fs.pickle"
 CUSTOM_PICKLE = "/cowrie/cowrie-git/var/fs.custom.pickle"
 HONEYFS_HOME = "/cowrie/cowrie-git/honeyfs/home/admin"
 
-# Files to inject into /home/admin/
+# Files to inject into /home/admin/, each with a believable ctime that lines up
+# with the maintenance log in README.md. Using fixed past dates (rather than the
+# build time) avoids the tell of every planted file sharing one fresh mtime.
 DECOY_FILES = [".env", "README.md"]
+FILE_CTIME_DATES: dict[str, str] = {
+    ".env": "2026-06-18",       # AWS backup integration added
+    "README.md": "2026-06-25",  # last maintenance-log entry
+}
+ADMIN_DIR_DATE = "2026-06-15"   # home directory provisioned
 
 
-def find(tree, path):
+def _epoch(date_str: str) -> int:
+    """Return the UTC unix timestamp for a YYYY-MM-DD date (noon, for realism)."""
+    return calendar.timegm(time.strptime(date_str + " 12:00:00", "%Y-%m-%d %H:%M:%S"))
+
+
+def find(tree: Any, path: str) -> Optional[Any]:
     """Walk the pickle tree to find the entry at path."""
     parts = [p for p in path.split("/") if p]
     node = tree
@@ -82,12 +97,12 @@ def find(tree, path):
     return node
 
 
-def find_in_tree(tree, path):
+def find_in_tree(tree: Any, path: str) -> Optional[Any]:
     """Alias for find() used in verification."""
     return find(tree, path)
 
 
-def main():
+def main() -> None:
     if not os.path.exists(BUNDLED_PICKLE):
         print(f"ERROR: Bundled pickle not found at {BUNDLED_PICKLE}")
         sys.exit(1)
@@ -104,12 +119,9 @@ def main():
     if isinstance(home[A_CONTENTS], list):
         home[A_CONTENTS] = [c for c in home[A_CONTENTS] if c[A_NAME] != "admin"]
 
-    # Build admin directory with decoy files
-    # Match the bundled pickle's 10-element format
-    import time as _time
-    now = int(_time.time())
-
-    children = []
+    # Build admin directory with decoy files, each stamped with a fixed,
+    # believable ctime. Match the bundled pickle's 10-element format.
+    children: list[list[Any]] = []
     for filename in DECOY_FILES:
         filepath = os.path.join(HONEYFS_HOME, filename)
         if os.path.exists(filepath):
@@ -117,13 +129,15 @@ def main():
         else:
             print(f"WARNING: {filepath} not found, skipping")
             continue
+        ctime = _epoch(FILE_CTIME_DATES.get(filename, ADMIN_DIR_DATE))
         # [name, type, uid, gid, size, mode, ctime, contents, target, realfile]
-        entry = [filename, T_FILE, ADMIN_UID, ADMIN_GID, len(content), FILE_MODE_644, now, content, None, None]
+        entry = [filename, T_FILE, ADMIN_UID, ADMIN_GID, len(content), FILE_MODE_644, ctime, content, None, None]
         children.append(entry)
         print(f"  Injected: /home/admin/{filename} ({len(content)} bytes)")
 
     # [name, type, uid, gid, size, mode, ctime, contents, target, realfile]
-    admin_entry = ["admin", T_DIR, ADMIN_UID, ADMIN_GID, 4096, DIR_MODE_755, now, children, None, None]
+    dir_ctime = _epoch(ADMIN_DIR_DATE)
+    admin_entry = ["admin", T_DIR, ADMIN_UID, ADMIN_GID, 4096, DIR_MODE_755, dir_ctime, children, None, None]
     home[A_CONTENTS].append(admin_entry)
 
     # Ensure var directory exists

@@ -1,0 +1,19 @@
+# Cowrie credential database for corp-webapp-01.
+# Format: username:x:password  (a leading ! negates, /regex/ matches a pattern).
+#
+# Deliberately curated instead of using cowrie's shipped example, which accepts
+# any password for root via a wildcard and ships a demo user 'phil'. Both are
+# well-known cowrie fingerprints, and 'phil' is not present in /etc/passwd here.
+#
+# We accept the planted decoy admin credential plus a set of common weak
+# passwords for root, so opportunistic brute-force attempts still land in the
+# honeypot without advertising the "any password works" tell.
+
+admin:x:NordTech@Admin#2024
+root:x:root
+root:x:toor
+root:x:admin
+root:x:123456
+root:x:password
+root:x:1234
+root:x:Passw0rd

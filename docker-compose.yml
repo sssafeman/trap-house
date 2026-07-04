@@ -33,6 +33,7 @@ services:
     volumes:
       - ./data/logs/cowrie:/var/log/trap-house
       - ./services/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - ./services/cowrie/etc/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
       - ./services/cowrie/honeyfs:/cowrie/cowrie-git/honeyfs:ro
       - ./services/cowrie/scripts/build_custom_pickle.py:/opt/scripts/build_custom_pickle.py:ro
       - cowrie-var:/cowrie/cowrie-git/var
