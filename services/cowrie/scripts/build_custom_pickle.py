@@ -22,28 +22,33 @@ import os
 import pickle
 import sys
 
-# Entry tuple field indices (from cowrie.shell.fs / honeyfs analysis)
-# Entry format: (name, type, st_mode_flags, uid, gid_or_size, st_mode, mtime, contents, target, extra)
+# Entry list field indices (must match cowrie.shell.fs A_* constants exactly).
+# Entry format: [name, type, uid, gid, size, mode, ctime, contents, target, realfile]
 #   [0] name: string
 #   [1] type: 0=link, 1=dir, 2=file
-#   [2] st_mode flags (0 in bundled pickle)
-#   [3] uid
-#   [4] gid (for dirs) or size (for files) 
-#   [5] st_mode: full stat mode (e.g. 33188 = 0o100644 for file, 16877 = 0o040755 for dir)
-#   [6] mtime: unix timestamp
-#   [7] contents: bytes (file) or list (dir)
+#   [2] uid: owner user id
+#   [3] gid: owner group id
+#   [4] size: file size in bytes (or nominal size for dirs)
+#   [5] mode: full stat mode (e.g. 33188 = 0o100644 for file, 16877 = 0o040755 for dir)
+#   [6] ctime: unix timestamp
+#   [7] contents: bytes (file) or list of child entries (dir)
 #   [8] target: symlink target (None for non-links)
-#   [9] extra: None in bundled pickle
+#   [9] realfile: on-disk honeyfs path (None; content is served from [7])
 A_NAME = 0
 A_TYPE = 1
-A_FLAGS = 2
-A_UID = 3
-A_GID = 4
+A_UID = 2
+A_GID = 3
+A_SIZE = 4
 A_MODE = 5
-A_MTIME = 6
+A_CTIME = 6
 A_CONTENTS = 7
 A_TARGET = 8
-A_EXTRA = 9
+A_REALFILE = 9
+
+# /home/admin and its decoy files are owned by the admin account (uid/gid 1000),
+# matching the admin entry in honeyfs/etc/passwd so `ls -l` looks consistent.
+ADMIN_UID = 1000
+ADMIN_GID = 1000
 
 T_LINK = 0
 T_DIR = 1
@@ -112,13 +117,13 @@ def main():
         else:
             print(f"WARNING: {filepath} not found, skipping")
             continue
-        # (name, type, flags, uid, size, st_mode, mtime, contents, target, extra)
-        entry = [filename, T_FILE, 0, 0, len(content), FILE_MODE_644, now, content, None, None]
+        # [name, type, uid, gid, size, mode, ctime, contents, target, realfile]
+        entry = [filename, T_FILE, ADMIN_UID, ADMIN_GID, len(content), FILE_MODE_644, now, content, None, None]
         children.append(entry)
         print(f"  Injected: /home/admin/{filename} ({len(content)} bytes)")
 
-    # (name, type, flags, uid, gid, st_mode, mtime, contents, target, extra)
-    admin_entry = ["admin", T_DIR, 0, 0, 1000, DIR_MODE_755, now, children, None, None]
+    # [name, type, uid, gid, size, mode, ctime, contents, target, realfile]
+    admin_entry = ["admin", T_DIR, ADMIN_UID, ADMIN_GID, 4096, DIR_MODE_755, now, children, None, None]
     home[A_CONTENTS].append(admin_entry)
 
     # Ensure var directory exists
