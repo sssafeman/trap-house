@@ -17,6 +17,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install lint dependencies
+        run: python -m pip install --quiet pyyaml
+
       - name: Byte-compile all Python services
         run: |
           python -m py_compile \
