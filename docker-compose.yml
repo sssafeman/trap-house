@@ -1,9 +1,21 @@
+# Trap House stack. All images pinned by digest (never :latest); every service
+# drops capabilities, sets no-new-privileges, has resource ceilings, and rotates
+# its container logs.
+
+# Shared log-rotation policy: cap each container's json-file log so a high-volume
+# honeypot cannot fill the host disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # SSH tarpit. Accepts connections and drip-feeds a fake banner at 1 byte/sec.
   # Note: read_only not compatible with linuxserver/s6-overlay images.
   # Hardening: cap_drop ALL, no-new-privileges, tmpfs for /tmp and /config.
   endlessh:
-    image: lscr.io/linuxserver/endlessh:version-dfe44eb2
+    image: lscr.io/linuxserver/endlessh:version-dfe44eb2@sha256:1ba907783c782f2900347a42d730d97ccc88ab50e9c3403657211ca711d02ecc
     container_name: trap-endlessh
     ports:
       - "${ENDLESSH_PORT:-22222}:2222"
@@ -19,11 +31,15 @@ services:
       - /config:noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
+    mem_limit: 64m
+    pids_limit: 512
+    cpus: 0.50
+    logging: *default-logging
     restart: unless-stopped
 
   # SSH/Telnet honeypot. Accepts credentials, provides fake shell, logs JSON.
   cowrie:
-    image: cowrie/cowrie:sha-a2887ca
+    image: cowrie/cowrie:sha-a2887ca@sha256:b4817f185e522f5a66975568ff304ae02c042b65454c2542918f42dbaf1b31fa
     container_name: trap-cowrie
     ports:
       - "${COWRIE_SSH_PORT:-2222}:2222"
@@ -41,6 +57,10 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 512
+    cpus: 1.00
+    logging: *default-logging
     restart: unless-stopped
 
   # Deception middleware. FastAPI fake corporate web app with maze logic.
@@ -56,22 +76,62 @@ services:
     environment:
       - ENABLE_CANARYTOKENS=${ENABLE_CANARYTOKENS:-false}
       - SESSION_SECRET=${SESSION_SECRET:-changeme-secret-key}
+      # Bound directly to the internet with no reverse proxy: do not trust XFF.
+      - TRUST_XFF=${TRUST_XFF:-false}
+      - CANARY_EMAIL_DOMAIN=${CANARY_EMAIL_DOMAIN:-}
+      - PYTHONDONTWRITEBYTECODE=1
+    read_only: true
     cap_drop:
       - ALL
     tmpfs:
       - /tmp:noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 256
+    cpus: 0.50
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *default-logging
     restart: unless-stopped
 
-  # Log shipper. Reads Cowrie JSON logs and Endlessh stdout (via docker logs),
-  # normalizes to shared event schema, writes to SQLite.
+  # Scoped, read-only Docker API proxy. Fronts the Docker socket so the
+  # log-shipper (which parses attacker-controlled logs) can read endlessh
+  # container logs without holding the raw socket, which would be host-root.
+  # Only the containers API section is enabled; writes (POST) stay denied.
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    container_name: trap-socket-proxy
+    networks:
+      - trap-internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CONTAINERS=1
+      - POST=0
+      - LOG_LEVEL=warning
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    pids_limit: 64
+    cpus: 0.25
+    logging: *default-logging
+    restart: unless-stopped
+
+  # Log shipper. Reads Cowrie JSON logs and Endlessh stdout (via the socket
+  # proxy), normalizes to shared event schema, writes to SQLite.
   log-shipper:
     build:
       context: ./services/log-shipper
       args:
         DOCKER_GID: ${DOCKER_GID:-999}
     container_name: trap-log-shipper
+    depends_on:
+      - socket-proxy
     networks:
       - trap-internal
     volumes:
@@ -81,18 +141,27 @@ services:
       - ./data/logs/deception-gw:/var/log/trap-house/deception-gw:ro
       # SQLite database persisted on host
       - ./data/db:/data/db
-      # Docker socket for reading endlessh container logs
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - ENDLESSH_CONTAINER=trap-endlessh
+      - ENDLESSH_DEST_PORT=${ENDLESSH_PORT:-22222}
+      # Reach the Docker API through the scoped proxy, not the raw socket.
+      - DOCKER_HOST=tcp://trap-socket-proxy:2375
       - DB_PATH=/data/db/trap-house.db
       - LOG_DIR=/var/log/trap-house
       - POLL_INTERVAL=2
       - LOKI_URL=http://loki:3100/loki/api/v1/push
+      - PYTHONDONTWRITEBYTECODE=1
+    read_only: true
     cap_drop:
       - ALL
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+    cpus: 0.50
+    logging: *default-logging
     restart: unless-stopped
 
   # MITRE mapper. Reads events from SQLite, maps to ATT&CK techniques,
@@ -109,10 +178,18 @@ services:
       - DB_PATH=/data/db/trap-house.db
       - TECHNIQUES_FILE=/config/mitre-techniques.yaml
       - POLL_INTERVAL=5
+      - PYTHONDONTWRITEBYTECODE=1
+    read_only: true
     cap_drop:
       - ALL
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+    cpus: 0.50
+    logging: *default-logging
     restart: unless-stopped
 
   # Threat intelligence frontend. Custom FastAPI dashboard with Leaflet map,
@@ -121,7 +198,8 @@ services:
     build: ./services/frontend
     container_name: trap-frontend
     ports:
-      - "${FRONTEND_PORT:-8001}:8001"
+      # Localhost-only. Reach it in prod via SSH tunnel; in dev via localhost.
+      - "127.0.0.1:${FRONTEND_PORT:-8001}:8001"
     networks:
       - trap-external
       - trap-internal
@@ -129,15 +207,29 @@ services:
       - ./data/db:/data/db:ro
     environment:
       - DB_PATH=/data/db/trap-house.db
+      - PYTHONDONTWRITEBYTECODE=1
+    read_only: true
     cap_drop:
       - ALL
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+    cpus: 0.50
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *default-logging
     restart: unless-stopped
 
   # Loki log aggregation. Receives structured logs from log-shipper.
   loki:
-    image: grafana/loki:3.4.2
+    image: grafana/loki:3.4.2@sha256:58a6c186ce78ba04d58bfe2a927eff296ba733a430df09645d56cdc158f3ba08
     container_name: trap-loki
     networks:
       - trap-internal
@@ -147,17 +239,28 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 256
+    cpus: 1.00
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
     restart: unless-stopped
 
   # Grafana dashboard for log-based metrics. Internal only.
   grafana:
-    image: grafana/grafana:11.5.2
+    image: grafana/grafana:11.5.2@sha256:8b37a2f028f164ce7b9889e1765b9d6ee23fec80f871d156fbf436d6198d32b7
     container_name: trap-grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      # Localhost-only. Reach it in prod via SSH tunnel; in dev via localhost.
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     networks:
       - trap-internal
-      - trap-external  # Dev access via host port. Prod: SSH tunnel only.
+      - trap-external  # Dev access via localhost. Prod: SSH tunnel only.
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
       - GF_AUTH_ANONYMOUS_ENABLED=true
@@ -173,6 +276,16 @@ services:
       - SETGID
     security_opt:
       - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 256
+    cpus: 1.00
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:

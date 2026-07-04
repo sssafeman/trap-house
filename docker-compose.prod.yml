@@ -1,45 +1,26 @@
-# Trap House Production Override (Hetzner)
+# Trap House production override.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d
 #
-# Key differences from dev:
-# - Endlessh on port 22 (host SSH moves to high port via harden.sh)
-# - Deception-gw on port 80
-# - Grafana and frontend have NO external ports (accessed via SSH tunnel)
-# - SSH tunnel: ssh -L 8001:localhost:8001 -L 3000:localhost:3000 user@vps
-# - Grafana anonymous access disabled, admin password required
-#
-# The !reset and !override tags are Docker Compose v2+ features for
-# replacing list values in merge overrides.
+# Ports and interface bindings come from the base compose plus .env.hetzner
+# (host SSH stays on 22, Endlessh tarpit on 22222, deception-gw on 80, Grafana
+# and the frontend bound to 127.0.0.1 and reached via SSH tunnel). This file
+# only adds hardening that must not be active in dev.
 
 services:
-  endlessh:
-    ports: !override
-      - "22222:2222"
-
-  cowrie:
-    ports: !override
-      - "2222:2222"
-      - "2223:2223"
-
   deception-gw:
-    ports: !override
-      - "80:8000"
-
-  frontend:
-    ports: !override
-      - "127.0.0.1:8001:8001"
-    networks: !override
-      - trap-internal
-      - trap-external
+    environment:
+      # Fail closed: refuse to start in prod if the cookie-signing secret is
+      # unset, rather than silently signing sessions with the dev default.
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET must be set for production}
+      - ENABLE_CANARYTOKENS=${ENABLE_CANARYTOKENS:-false}
+      - TRUST_XFF=${TRUST_XFF:-false}
+      - CANARY_EMAIL_DOMAIN=${CANARY_EMAIL_DOMAIN:-}
+      - PYTHONDONTWRITEBYTECODE=1
 
   grafana:
-    ports: !override
-      - "127.0.0.1:3000:3000"
-    networks: !override
-      - trap-internal
-      - trap-external
-    environment: !override
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    environment:
+      # No anonymous access in production; require the admin password.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set for production}
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
       - GF_SERVER_SERVE_FROM_SUB_PATH=false
