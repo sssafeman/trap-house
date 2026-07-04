@@ -20,7 +20,7 @@ COMPANY_NAME: str = "NordTech Solutions"
 # Layer 1 decoy credentials. These match Cowrie's planted .env file so an
 # attacker who pivots from SSH to the web app finds the same logins work.
 DECOY_CREDENTIALS: dict[str, str] = {
-    "admin": "TrapH0use!2026",
+    "admin": "NordTech@Admin#2024",
     "devops": "D3v0ps_S3cur1ty",
     "backup": "b@ckup_s3rv3r_99",
 }
@@ -40,9 +40,9 @@ DEEPER_CREDENTIALS: dict[str, str] = {
 
 # Fake AWS keys shown on /admin/config. The access key id embeds a canary
 # marker so it is recognizable if it ever shows up in real logs.
-FAKE_AWS_ACCESS_KEY: str = "AKIATRAPHOUSE0000DEC0Y"
-FAKE_AWS_SECRET_KEY: str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYTRAPHOUSEKEY"
-FAKE_AWS_CANARY_ID: str = "AKIA-DECOY-001"
+FAKE_AWS_ACCESS_KEY: str = "AKIA3Q7M2X9K4R8PJX9C"
+FAKE_AWS_SECRET_KEY: str = "aB3kF9mN2pQ7rT4vW8xZ6sD1cE5gH0jL3iU9oY2n"
+FAKE_AWS_CANARY_ID: str = "AKIA3Q7M2X9K4R8PJX9C"
 
 # Progressive auth delay. Delay on the nth failure is min(2^n, AUTH_DELAY_CAP).
 AUTH_DELAY_CAP: int = 30

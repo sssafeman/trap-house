@@ -31,7 +31,7 @@ INITIAL_FS: dict[str, object] = {
     "/etc/hostname": HOSTNAME + "\n",
     "/home": ["admin"],
     "/home/admin": [".env"],
-    "/home/admin/.env": "DB_PASSWORD=M@z3Loop#999\nAWS_ACCESS_KEY=AKIATRAPHOUSE0000DEC0Y\n",
+    "/home/admin/.env": "DB_PASSWORD=M@z3Loop#999\nAWS_ACCESS_KEY=AKIA3Q7M2X9K4R8PJX9C\n",
     "/root": ["flag.txt"],
     "/root/flag.txt": "Internal note: db_admin credentials work on the /login portal.\n",
     "/tmp": [],
