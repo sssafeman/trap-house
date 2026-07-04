@@ -12,6 +12,7 @@ deception-gw: reads JSONL from /var/log/trap-house/deception-gw/deception-gw.jso
 Loki: pushes normalized events to http://loki:3100/loki/api/v1/push
 """
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -69,6 +70,17 @@ MITRE_MAP: dict[str, tuple[str, str]] = {
     "credential_use": ("T1552.001", "credential-access"),
     "file_access": ("T1083", "discovery"),
 }
+
+
+def stable_event_id(source: str, payload: str) -> str:
+    """Derive a deterministic event_id from the raw event content.
+
+    The shipper tracks file offsets in memory, so on restart it re-reads the
+    current log file from the beginning. Using a content hash as the primary key
+    (instead of a fresh UUID per read) makes re-ingestion idempotent: an
+    INSERT OR IGNORE for an already-seen line is a no-op instead of a duplicate.
+    """
+    return hashlib.sha256(f"{source}|{payload}".encode("utf-8")).hexdigest()
 
 
 def get_db() -> sqlite3.Connection:
@@ -199,7 +211,7 @@ def normalize_cowrie(raw: dict[str, Any]) -> dict[str, Any]:
         details["duplicate"] = raw["duplicate"]
 
     return {
-        "event_id": str(uuid.uuid4()),
+        "event_id": stable_event_id("cowrie", json.dumps(raw, sort_keys=True)),
         "timestamp": raw.get("timestamp", datetime.now(timezone.utc).isoformat()),
         "source_service": "cowrie",
         "source_ip": source_ip,
@@ -235,14 +247,14 @@ def normalize_endlessh(line: str) -> dict[str, Any] | None:
         if host.startswith("::ffff:"):
             host = host[7:]
         return {
-            "event_id": str(uuid.uuid4()),
+            "event_id": stable_event_id("endlessh", line),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source_service": "endlessh",
             "source_ip": host,
             "source_port": int(port) if port else None,
             "dest_port": ENDLESSH_DEST_PORT,
             "event_type": "tarpit_connect",
-            "session_id": str(uuid.uuid4()),
+            "session_id": stable_event_id("endlessh-session", line),
             "cowrie_session": None,
             "protocol": "ssh",
             "username": None,
@@ -356,8 +368,13 @@ def push_to_loki(events: list[dict[str, Any]]) -> None:
 
 
 def insert_event(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
-    """Insert a normalized event into SQLite."""
-    conn.execute(
+    """Insert a normalized event into SQLite.
+
+    Uses INSERT OR IGNORE on the content-derived event_id, so re-reading an
+    already-ingested log line is a no-op. Session tracking only runs when a row
+    was actually inserted, so re-reads do not inflate session event counts.
+    """
+    cur = conn.execute(
         """
         INSERT OR IGNORE INTO events (
             event_id, timestamp, source_service, source_ip, source_port,
@@ -386,6 +403,11 @@ def insert_event(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
             event["raw_data"],
         ),
     )
+
+    # A duplicate (already-seen event_id) inserts no row; skip session tracking.
+    if cur.rowcount == 0:
+        conn.commit()
+        return
 
     # Update session tracking
     if event["session_id"]:
