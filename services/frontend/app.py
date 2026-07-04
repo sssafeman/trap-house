@@ -7,6 +7,7 @@ writes to the database.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import urllib.request
@@ -71,8 +72,10 @@ def query_one(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any]:
 
 
 # In-memory geolocation cache: IP -> {lat, lng, country, city} or {} on failure.
-# Avoids re-looking up the same IP on every 10s refresh.
+# Avoids re-looking up the same IP on every 10s refresh. Bounded so a stream of
+# distinct (possibly spoofed) source IPs cannot grow it without limit.
 _geo_cache: dict[str, dict[str, Any]] = {}
+_GEO_CACHE_MAX = 10000
 
 
 def geolocate_ip(ip: str) -> dict[str, Any]:
@@ -115,6 +118,8 @@ def geolocate_ip(ip: str) -> dict[str, Any]:
     except Exception:
         result = {}
 
+    if len(_geo_cache) >= _GEO_CACHE_MAX:
+        _geo_cache.pop(next(iter(_geo_cache)))
     _geo_cache[ip] = result
     return result
 
@@ -300,13 +305,18 @@ async def api_attack_map() -> JSONResponse:
         LIMIT 100
         """
     )
-    # Enrich each row with geolocation data.
-    for row in rows:
-        geo = geolocate_ip(row.get("source_ip", ""))
-        row["lat"] = geo.get("lat")
-        row["lng"] = geo.get("lng")
-        row["country"] = geo.get("country", "")
-        row["city"] = geo.get("city", "")
+    # Enrich each row with geolocation data. geolocate_ip makes blocking HTTP
+    # calls on a cold cache, so run the whole enrichment in a worker thread to
+    # keep the event loop free for other dashboard requests.
+    def _enrich() -> None:
+        for row in rows:
+            geo = geolocate_ip(row.get("source_ip", ""))
+            row["lat"] = geo.get("lat")
+            row["lng"] = geo.get("lng")
+            row["country"] = geo.get("country", "")
+            row["city"] = geo.get("city", "")
+
+    await asyncio.to_thread(_enrich)
     return JSONResponse(rows)
 
 

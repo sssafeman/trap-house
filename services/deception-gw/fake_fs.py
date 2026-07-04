@@ -7,6 +7,8 @@ os.system, __import__, or compile anywhere in this module.
 import copy
 from typing import Optional
 
+import config
+
 HOSTNAME: str = "corp-webapp-01"
 KERNEL: str = (
     "Linux corp-webapp-01 5.15.0-91-generic #101-Ubuntu SMP "
@@ -31,9 +33,12 @@ INITIAL_FS: dict[str, object] = {
     "/etc/hostname": HOSTNAME + "\n",
     "/home": ["admin"],
     "/home/admin": [".env"],
-    "/home/admin/.env": "DB_PASSWORD=M@z3Loop#999\nAWS_ACCESS_KEY=AKIA3Q7M2X9K4R8PJX9C\n",
-    "/root": ["flag.txt"],
-    "/root/flag.txt": "Internal note: db_admin credentials work on the /login portal.\n",
+    "/home/admin/.env": (
+        "DB_HOST=10.0.1.50\nDB_NAME=corporate_web\nDB_USER=admin\n"
+        "DB_PASS=NordTech@Admin#2024\n"
+    ),
+    "/root": ["deploy_notes.txt"],
+    "/root/deploy_notes.txt": "Reminder: db_admin credentials also work on the /login portal.\n",
     "/tmp": [],
 }
 
@@ -68,14 +73,25 @@ class WebshellSandbox:
     def __init__(self) -> None:
         self.fs: dict[str, object] = copy.deepcopy(INITIAL_FS)
         self.cwd: str = "/var/www/html"
+        self._stored_bytes: int = 0
 
     def upload(self, filename: str, content: str) -> str:
         """Store an uploaded file in the fake uploads directory. Returns the
-        fake path the file was 'written' to."""
+        fake path the file was 'written' to.
+
+        Enforces per-sandbox file-count and total-byte ceilings so a single
+        attacker cannot grow one sandbox without bound.
+        """
         safe_name = filename.replace("/", "_").replace("..", "_")
         path = f"/var/www/uploads/{safe_name}"
-        self.fs[path] = content
         listing = self.fs.get("/var/www/uploads")
+        is_new = not (isinstance(listing, list) and safe_name in listing)
+        if is_new and self._stored_bytes + len(content) > config.MAX_SANDBOX_BYTES:
+            return path
+        if is_new and isinstance(listing, list) and len(listing) >= config.MAX_SANDBOX_FILES:
+            return path
+        self._stored_bytes += len(content)
+        self.fs[path] = content
         if isinstance(listing, list) and safe_name not in listing:
             listing.append(safe_name)
         return path

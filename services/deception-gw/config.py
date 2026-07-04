@@ -46,3 +46,22 @@ FAKE_AWS_CANARY_ID: str = "AKIA3Q7M2X9K4R8PJX9C"
 
 # Progressive auth delay. Delay on the nth failure is min(2^n, AUTH_DELAY_CAP).
 AUTH_DELAY_CAP: int = 30
+
+# Resource bounds. This service is bound directly to the internet, so every
+# attacker-driven accumulator needs a ceiling to prevent memory exhaustion.
+MAX_UPLOAD_BYTES: int = 1024 * 1024        # Reject uploads larger than 1 MiB.
+MAX_SANDBOX_BYTES: int = 4 * 1024 * 1024   # Cap total bytes stored per sandbox.
+MAX_SANDBOX_FILES: int = 50                # Cap files stored per sandbox.
+MAX_SANDBOXES: int = 2048                  # Evict oldest sandboxes past this.
+MAX_TRACKED_IPS: int = 8192               # Evict oldest failure counters past this.
+
+# Trust the X-Forwarded-For header only when a known reverse proxy sets it.
+# When the app is bound directly to a public port (the default), the header is
+# fully attacker-controlled and must be ignored so logged source IPs are real.
+TRUST_XFF: bool = os.environ.get("TRUST_XFF", "false").lower() == "true"
+
+# Domain used for the canarytoken email addresses sprinkled into the fake user
+# dataset. Leave blank to disable (all addresses use the corporate domain).
+# Do NOT use "canarytokens.org" here: that literal domain is a well-known
+# honeypot signature. Point this at a canary domain you control.
+CANARY_EMAIL_DOMAIN: str = os.environ.get("CANARY_EMAIL_DOMAIN", "")

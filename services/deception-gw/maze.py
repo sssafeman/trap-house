@@ -35,7 +35,15 @@ class Maze:
     # Progressive authentication delay -------------------------------------
 
     def record_failure(self, ip: str) -> int:
-        """Increment and return the failure count for an IP."""
+        """Increment and return the failure count for an IP.
+
+        The map is bounded at config.MAX_TRACKED_IPS by evicting the oldest
+        entry, so a flood of failed logins from unique (possibly spoofed) IPs
+        cannot grow it without limit.
+        """
+        if ip not in self._failures_by_ip:
+            while len(self._failures_by_ip) >= config.MAX_TRACKED_IPS:
+                self._failures_by_ip.pop(next(iter(self._failures_by_ip)))
         self._failures_by_ip[ip] = self._failures_by_ip.get(ip, 0) + 1
         return self._failures_by_ip[ip]
 

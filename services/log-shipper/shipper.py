@@ -29,6 +29,8 @@ LOG_DIR = Path(os.environ.get("LOG_DIR", "/var/log/trap-house"))
 DB_PATH = os.environ.get("DB_PATH", "/data/db/trap-house.db")
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "2"))
 ENDLESSH_CONTAINER = os.environ.get("ENDLESSH_CONTAINER", "trap-endlessh")
+# Public-facing port attackers hit on the tarpit (22 in prod, 22222 in dev).
+ENDLESSH_DEST_PORT = int(os.environ.get("ENDLESSH_DEST_PORT", "22"))
 LOKI_URL = os.environ.get("LOKI_URL", "http://loki:3100/loki/api/v1/push")
 
 # Cowrie event ID to Trap House event type mapping
@@ -218,8 +220,8 @@ def normalize_cowrie(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_endlessh(line: str) -> dict[str, Any] | None:
-    """Parse Endlessh log lines. Endlessh logs ACCEPT and CLOSE lines to stdout.
-    The endlessh-log sidecar captures these to a file."""
+    """Parse Endlessh log lines. Endlessh logs ACCEPT and CLOSE lines to stdout,
+    which the shipper reads via `docker logs` (see get_endlessh_logs)."""
     if "ACCEPT" in line:
         parts = line.split()
         host = ""
@@ -238,7 +240,7 @@ def normalize_endlessh(line: str) -> dict[str, Any] | None:
             "source_service": "endlessh",
             "source_ip": host,
             "source_port": int(port) if port else None,
-            "dest_port": 2222,
+            "dest_port": ENDLESSH_DEST_PORT,
             "event_type": "tarpit_connect",
             "session_id": str(uuid.uuid4()),
             "cowrie_session": None,
@@ -268,14 +270,21 @@ def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
     if event_type in MITRE_MAP:
         mitre_technique, mitre_tactic = MITRE_MAP[event_type]
 
-    # Build attacker fingerprint from deception-gw data
+    # deception-gw nests its fingerprint under "attacker_fingerprint" and its
+    # per-event fields under "details" (see deception-gw/logger.py). Read from
+    # those nested objects; the values are not present at the top level.
+    raw_fp = raw.get("attacker_fingerprint") or {}
+    details = raw.get("details") or {}
+
     fingerprint: dict[str, Any] = {}
-    if "user_agent" in raw:
-        fingerprint["user_agent"] = raw["user_agent"]
-    if "tool" in raw:
-        fingerprint["tool"] = raw["tool"]
-    elif "user_agent" in raw:
-        ua = raw["user_agent"].lower()
+    user_agent = raw_fp.get("user_agent", "")
+    if user_agent:
+        fingerprint["user_agent"] = user_agent
+    tool = raw_fp.get("tool", "")
+    if tool:
+        fingerprint["tool"] = tool
+    elif user_agent:
+        ua = user_agent.lower()
         if "sqlmap" in ua:
             fingerprint["tool"] = "sqlmap"
         elif "curl" in ua:
@@ -296,8 +305,8 @@ def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
         "session_id": session_id,
         "cowrie_session": None,
         "protocol": "http",
-        "username": raw.get("username", ""),
-        "command": raw.get("command", ""),
+        "username": details.get("username", ""),
+        "command": details.get("command", ""),
         "attacker_fingerprint": json.dumps(fingerprint) if fingerprint else None,
         "mitre_technique": mitre_technique,
         "mitre_tactic": mitre_tactic,

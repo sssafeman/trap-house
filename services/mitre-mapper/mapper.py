@@ -84,6 +84,15 @@ def init_db(conn: sqlite3.Connection) -> None:
             risk_score REAL DEFAULT 0.0
         );
 
+        -- Records every event the mapper has processed, whether or not it
+        -- produced a technique match. Without this, events that match no
+        -- technique (session_disconnect, client_version, and similar) would
+        -- never get a techniques row and would be re-fetched forever, stalling
+        -- the mapper once 500 such events accumulate.
+        CREATE TABLE IF NOT EXISTS mapping_state (
+            event_id TEXT PRIMARY KEY
+        );
+
         CREATE INDEX IF NOT EXISTS idx_techniques_event ON techniques(event_id);
         CREATE INDEX IF NOT EXISTS idx_techniques_technique ON techniques(technique_id);
         CREATE INDEX IF NOT EXISTS idx_attackers_ip ON attackers(source_ip);
@@ -258,14 +267,19 @@ def update_attackers(conn: sqlite3.Connection) -> None:
 
 
 def get_unmapped_events(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Get events that have not yet been mapped to techniques."""
+    """Get events the mapper has not processed yet.
+
+    "Unprocessed" means absent from mapping_state, not absent from techniques,
+    so events that legitimately match no technique are still retired after one
+    pass instead of being re-fetched on every cycle.
+    """
     rows = conn.execute(
         """
         SELECT e.event_id, e.event_type, e.raw_data, e.details, e.command,
                e.attacker_fingerprint
         FROM events e
-        LEFT JOIN techniques t ON e.event_id = t.event_id
-        WHERE t.event_id IS NULL
+        LEFT JOIN mapping_state ms ON e.event_id = ms.event_id
+        WHERE ms.event_id IS NULL
         ORDER BY e.timestamp ASC
         LIMIT 500
         """
@@ -284,36 +298,55 @@ def get_unmapped_events(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return events
 
 
+def mark_mapped(conn: sqlite3.Connection, event_ids: list[str]) -> None:
+    """Record that these events have been processed, so they are not re-fetched."""
+    conn.executemany(
+        "INSERT OR IGNORE INTO mapping_state (event_id) VALUES (?)",
+        [(eid,) for eid in event_ids],
+    )
+    conn.commit()
+
+
 def main() -> None:
     print(f"[mitre-mapper] Starting. DB={DB_PATH}, techniques={TECHNIQUES_FILE}")
     static_map, patterns = load_techniques(TECHNIQUES_FILE)
     print(f"[mitre-mapper] Loaded {len(static_map)} static mappings, {len(patterns)} regex patterns")
 
-    conn = sqlite3.connect(DB_PATH)
+    # busy_timeout lets the mapper wait out short lock windows from the
+    # shipper, which writes the same database concurrently, instead of
+    # raising OperationalError.
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA busy_timeout=30000")
     init_db(conn)
-    print("[mitre-mapper] Database initialized (techniques, attackers tables)")
+    print("[mitre-mapper] Database initialized (techniques, attackers, mapping_state tables)")
 
     cycle = 0
     while True:
-        # Get unmapped events
-        unmapped = get_unmapped_events(conn)
+        try:
+            unmapped = get_unmapped_events(conn)
 
-        if unmapped:
-            all_matches: list[dict[str, Any]] = []
-            for event in unmapped:
-                matches = map_event(event, static_map, patterns)
-                all_matches.extend(matches)
-            write_techniques(conn, all_matches)
-            print(f"[mitre-mapper] Cycle {cycle}: mapped {len(unmapped)} events, found {len(all_matches)} technique matches")
+            if unmapped:
+                all_matches: list[dict[str, Any]] = []
+                for event in unmapped:
+                    matches = map_event(event, static_map, patterns)
+                    all_matches.extend(matches)
+                write_techniques(conn, all_matches)
+                # Retire every processed event, including zero-match ones.
+                mark_mapped(conn, [e["event_id"] for e in unmapped])
+                print(f"[mitre-mapper] Cycle {cycle}: mapped {len(unmapped)} events, found {len(all_matches)} technique matches")
 
-            # Update attacker profiles every 30 seconds (6 cycles * 5s)
-            if cycle % 6 == 0:
-                update_attackers(conn)
-                print(f"[mitre-mapper] Updated attacker profiles")
-        else:
-            # Still update attacker profiles periodically
-            if cycle % 12 == 0:
-                update_attackers(conn)
+                # Update attacker profiles every 30 seconds (6 cycles * 5s)
+                if cycle % 6 == 0:
+                    update_attackers(conn)
+                    print("[mitre-mapper] Updated attacker profiles")
+            else:
+                # Still update attacker profiles periodically
+                if cycle % 12 == 0:
+                    update_attackers(conn)
+        except Exception as e:
+            # Never let a transient DB error or a single malformed event kill
+            # the poller. Log and continue to the next cycle.
+            print(f"[mitre-mapper] Cycle {cycle} error (non-fatal): {e}")
 
         cycle += 1
         time.sleep(POLL_INTERVAL)

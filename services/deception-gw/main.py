@@ -23,9 +23,23 @@ templates = Jinja2Templates(directory="templates")
 maze = Maze()
 
 # Per-session webshell sandboxes, keyed by session_id. In memory only.
+# Insertion order is preserved so the oldest sandbox can be evicted once the
+# map grows past config.MAX_SANDBOXES, bounding memory under session churn.
 SANDBOXES: dict[str, WebshellSandbox] = {}
 
 COOKIE_NAME = "session"
+
+
+def _get_sandbox(session_id: str) -> WebshellSandbox:
+    """Return the sandbox for a session, creating it if needed and evicting the
+    oldest sandboxes so the map never exceeds config.MAX_SANDBOXES."""
+    sandbox = SANDBOXES.get(session_id)
+    if sandbox is None:
+        while len(SANDBOXES) >= config.MAX_SANDBOXES:
+            SANDBOXES.pop(next(iter(SANDBOXES)))
+        sandbox = WebshellSandbox()
+        SANDBOXES[session_id] = sandbox
+    return sandbox
 
 # Patterns that flag a search value as a SQL injection attempt.
 SQLI_PATTERNS: tuple[str, ...] = (
@@ -44,9 +58,11 @@ def _build_fake_users() -> list[dict[str, Any]]:
     users: list[dict[str, Any]] = []
     for i in range(10000):
         name = f"{first[i % len(first)].title()} {last[(i // 7) % len(last)].title()}"
-        # Sprinkle canarytoken-laced email addresses through the dataset.
-        if i % 250 == 0:
-            email = f"testuser{i}@user.canarytokens.org"
+        # Sprinkle canary email addresses through the dataset when a canary
+        # domain is configured. The domain must not be canarytokens.org, whose
+        # literal appearance would fingerprint this as a honeypot.
+        if config.CANARY_EMAIL_DOMAIN and i % 250 == 0:
+            email = f"finance.audit{i}@{config.CANARY_EMAIL_DOMAIN}"
         else:
             email = f"{first[i % len(first)]}.{last[(i // 7) % len(last)]}{i}@nordtech.no"
         users.append({
@@ -65,14 +81,19 @@ FAKE_USERS: list[dict[str, Any]] = _build_fake_users()
 # Request helpers ----------------------------------------------------------
 
 def _source(request: Request) -> tuple[str, int]:
-    """Return the attacker source IP and port, honoring X-Forwarded-For."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
-    elif request.client:
-        ip = request.client.host
-    else:
-        ip = "0.0.0.0"
+    """Return the attacker source IP and port.
+
+    X-Forwarded-For is honored only when config.TRUST_XFF is set (i.e. a trusted
+    reverse proxy is in front). Otherwise the header is attacker-controlled and
+    ignored, so logged source IPs cannot be spoofed.
+    """
+    ip = ""
+    if config.TRUST_XFF:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            ip = forwarded.split(",")[0].strip()
+    if not ip:
+        ip = request.client.host if request.client else "0.0.0.0"
     port = request.client.port if request.client else 0
     return ip, port
 
@@ -259,7 +280,7 @@ async def admin_files(request: Request) -> Response:
     if not session:
         return RedirectResponse(url="/login", status_code=302)
     maze.advance(session, 4)
-    sandbox = SANDBOXES.setdefault(session["session_id"], WebshellSandbox())
+    sandbox = _get_sandbox(session["session_id"])
     uploads = sandbox.fs.get("/var/www/uploads")
     response = templates.TemplateResponse(
         "admin_files.html",
@@ -281,9 +302,24 @@ async def admin_upload(request: Request, file: UploadFile) -> Response:
         return RedirectResponse(url="/login", status_code=302)
     ip, port = _source(request)
     ua = _ua(request)
-    raw = await file.read()
+    # Read at most one byte past the cap so oversized uploads can be detected
+    # and rejected without buffering the whole body in memory.
+    raw = await file.read(config.MAX_UPLOAD_BYTES + 1)
+    if len(raw) > config.MAX_UPLOAD_BYTES:
+        logger.log_event(
+            "webshell_upload", ip, port, session["session_id"],
+            {
+                "filename": file.filename or "upload.bin",
+                "rejected": "file_too_large",
+                "file_size": len(raw),
+            },
+            user_agent=ua,
+        )
+        response = RedirectResponse(url="/admin/files", status_code=302)
+        _persist(response, session)
+        return response
     content = raw.decode("utf-8", errors="replace")
-    sandbox = SANDBOXES.setdefault(session["session_id"], WebshellSandbox())
+    sandbox = _get_sandbox(session["session_id"])
     filename = file.filename or "upload.bin"
     path = sandbox.upload(filename, content)
     session["files_accessed"] = session.get("files_accessed", 0) + 1
@@ -304,7 +340,7 @@ async def admin_shell(request: Request, cmd: str = Form("")) -> Response:
         return RedirectResponse(url="/login", status_code=302)
     ip, port = _source(request)
     ua = _ua(request)
-    sandbox = SANDBOXES.setdefault(session["session_id"], WebshellSandbox())
+    sandbox = _get_sandbox(session["session_id"])
     output = sandbox.execute(cmd)
     session["commands_run"] = session.get("commands_run", 0) + 1
     logger.log_event(
