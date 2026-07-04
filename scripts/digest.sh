@@ -5,13 +5,29 @@
 
 set -euo pipefail
 
-VPS_HOST="REDACTED_HOST"
-VPS_USER="REDACTED_USER"
-VPS_PORT="22"
-DIGEST_DIR="${HOME}/projects/trap-house/digests"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Connection details are read from an untracked config file so the VPS host and
+# user never land in version control. Copy scripts/digest.env.example to
+# scripts/digest.env and fill it in, or export these vars in your environment.
+if [ -f "${SCRIPT_DIR}/digest.env" ]; then
+  # shellcheck disable=SC1091
+  . "${SCRIPT_DIR}/digest.env"
+fi
+
+VPS_HOST="${VPS_HOST:-}"
+VPS_USER="${VPS_USER:-}"
+VPS_PORT="${VPS_PORT:-22}"
+if [ -z "${VPS_HOST}" ] || [ -z "${VPS_USER}" ]; then
+  echo "ERROR: set VPS_HOST and VPS_USER in ${SCRIPT_DIR}/digest.env or the environment." >&2
+  echo "See scripts/digest.env.example." >&2
+  exit 1
+fi
+
+DIGEST_DIR="${DIGEST_DIR:-${HOME}/projects/trap-house/digests}"
 DATE=$(date +%Y-%m-%d)
 OUTFILE="${DIGEST_DIR}/${DATE}.md"
-SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=15"
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
 
 mkdir -p "${DIGEST_DIR}"
 

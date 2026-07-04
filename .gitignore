@@ -10,6 +10,9 @@ data/
 /.env.hetzner
 /.env.production
 
+# Local ops connection details (VPS host/user for scripts/digest.sh)
+scripts/digest.env
+
 # Secrets
 *.pem
 *.key
