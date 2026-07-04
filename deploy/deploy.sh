@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh: Deploy Trap House to a Hetzner VPS.
+# deploy.sh: Deploy Trap House to the production VPS.
 # Run this script ON the VPS after harden.sh has been executed.
 #
 # Prerequisites:

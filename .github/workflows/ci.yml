@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Byte-compile all Python services
+        run: |
+          python -m py_compile \
+            services/deception-gw/main.py \
+            services/deception-gw/config.py \
+            services/deception-gw/fake_fs.py \
+            services/deception-gw/maze.py \
+            services/deception-gw/logger.py \
+            services/log-shipper/shipper.py \
+            services/mitre-mapper/mapper.py \
+            services/frontend/app.py \
+            services/cowrie/scripts/build_custom_pickle.py
+
+      - name: Validate Compose files
+        run: |
+          cp .env.example .env
+          docker compose --env-file .env config >/dev/null
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+            --env-file .env config >/dev/null || true
+
+      - name: ShellCheck scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning deploy/*.sh scripts/*.sh verify.sh || true
+
+      - name: Validate MITRE technique YAML
+        run: python -c "import yaml; yaml.safe_load(open('config/mitre-techniques.yaml'))"

@@ -2,171 +2,161 @@
 
 ## System Topology
 
+Nine containers across two Docker networks. The intel store is a SQLite file on
+a bind mount (not a container); the log-shipper, mitre-mapper, and frontend all
+open it directly.
+
 ```
                         Internet
                            |
-                    +------+------+
-                    |             |
-              trap-external       |
-                    |             |
-           +--------+--+--+------+--------+
-           |           |  |              |
-       endlessh    cowrie  deception-gw
-       (tarpit)    (honeypot)  (FastAPI)
-           |           |  |              |
-           |    +------+  |              |
-           |    |         |              |
-           +----+---------+              |
-                |                        |
-         trap-logs (shared volume)       |
-                |                        |
-         +------+--------+               |
-         |               |               |
-    log-shipper      (JSON files)        |
-         |                               |
-    +----+----+----+                      |
-    |    |    |                          |
-    v    v    v                          |
-  mitre  loki  intel-store <-------------+
-  mapper       (SQLite)
-    |           |
-    v           v
-  grafana    frontend
-  (dashboard) (FastAPI + Leaflet)
+                    trap-external (bridge)
+                           |
+        +----------+-------+--------+-------------+
+        |          |                |             |
+    endlessh    cowrie         deception-gw    (frontend/grafana
+    (tarpit)   (honeypot)       (FastAPI)       host ports bound
+        |          |                |            to 127.0.0.1)
+        |          |  JSON logs     |
+        +----------+----------------+
+                   |
+          data/logs, data/db (bind mounts on the host)
+                   |
+    trap-internal (bridge, internal: true)
+                   |
+   +-----------+---+------------+-----------+---------+
+   |           |                |           |         |
+ socket-    log-shipper     mitre-mapper  loki     grafana
+ proxy         |                |           ^         ^
+ (docker    writes           reads/writes   |         |
+  API)      SQLite +          SQLite         +---------+
+   ^         Loki              |          frontend reads SQLite (ro)
+   |          |                |          and serves the SOC dashboard
+ endlessh    (log-shipper reads endlessh logs
+ logs         through the socket-proxy, not the raw socket)
 ```
 
 ## Networks
 
 ### trap-external
-Attacker-facing. Services here accept inbound connections from the internet.
-Containers: endlessh, cowrie, deception-gw
-No internal flag. These are the only services reachable from outside.
+Attacker-facing bridge. Services here accept inbound connections from the
+internet. Containers: endlessh, cowrie, deception-gw. The frontend and grafana
+also attach here only so their host ports (bound to 127.0.0.1) work; they expose
+nothing to the internet.
 
 ### trap-internal
-Backend. Services here cannot reach the internet.
-Containers: log-shipper, mitre-mapper, intel-store, loki, grafana, frontend
-Set internal: true in docker-compose.yml.
+Backend bridge with `internal: true`, so these containers cannot reach the
+internet. Containers: socket-proxy, log-shipper, mitre-mapper, loki, grafana,
+frontend.
 
-### trap-logs (volume, not a network)
-Shared Docker volume mounted at /var/log/trap-house in each honeypot container.
-All honeypot services write JSON log files here. log-shipper reads from this volume.
+### Shared data (bind mounts, not a network)
+- `data/logs/cowrie`, `data/logs/deception-gw`: honeypot JSONL logs. Written by
+  the honeypots, read by log-shipper.
+- `data/db`: the SQLite intel store (`trap-house.db`). Written by log-shipper and
+  mitre-mapper, read (read-only) by the frontend.
 
 ## Container Specifications
 
+All images are pinned by sha256 digest. Every service drops all capabilities,
+sets `no-new-privileges`, has memory/PID/CPU ceilings, and rotates its
+json-file logs.
+
 ### endlessh
-Image: ghcr.io/linuxserver/endlessh (pinned by digest)
-Ports: ${ENDLESSH_PORT}:2222 (container listens on 2222 internally)
-Network: trap-external
-Capabilities: drop ALL
-Read-only rootfs: yes (tmpfs for /tmp and /config)
-Purpose: Accept SSH connections and drip-feed banner at 1 byte/second. Wastes attacker time.
+- Image: `lscr.io/linuxserver/endlessh` (digest-pinned)
+- Host port: `${ENDLESSH_PORT}` -> 2222 (22222 in dev and prod)
+- Network: trap-external
+- Read-only rootfs: no (s6-overlay incompatible; hardened via cap_drop + tmpfs)
+- Purpose: accept SSH connections and drip-feed a banner at ~1 byte/second.
 
 ### cowrie
-Image: cowrie/cowrie:latest (pin to specific tag in Phase 1)
-Ports: ${COWRIE_SSH_PORT}:2222, ${COWRIE_TELNET_PORT}:2223
-Network: trap-external + trap-logs volume
-Capabilities: drop ALL
-Read-only rootfs: no (Cowrie needs writable filesystem for fake shell, but mount specific volumes)
-Purpose: SSH/Telnet honeypot. Accepts credentials, provides fake shell, logs all interaction as JSON.
+- Image: `cowrie/cowrie:sha-a2887ca` (digest-pinned)
+- Host ports: `${COWRIE_SSH_PORT}` -> 2222, `${COWRIE_TELNET_PORT}` -> 2223
+- Network: trap-external
+- Read-only rootfs: no (needs a writable var volume for the emulated shell)
+- Purpose: SSH/Telnet honeypot. Curated userdb, custom honeyfs, hostname
+  corp-webapp-01, modern Ubuntu banner and uname. Logs JSON to the bind mount.
 
 ### deception-gw
-Image: custom build (services/deception-gw/Dockerfile)
-Ports: ${DECEPTION_PORT}:8000
-Network: trap-external + trap-logs volume
-Capabilities: drop ALL
-Read-only rootfs: yes (tmpfs for /tmp, volume for /app/data)
-Purpose: FastAPI fake corporate web app. Serves fake login pages, fake admin panel, fake API endpoints. Plants decoy credentials. Maze logic routes attackers in circles.
+- Image: custom build (`services/deception-gw/Dockerfile`)
+- Host port: `${DECEPTION_PORT}` -> 8000 (8080 dev, 80 prod)
+- Network: trap-external
+- Read-only rootfs: yes (tmpfs for /tmp)
+- Purpose: FastAPI fake corporate web app with the 5-layer deception maze.
+
+### socket-proxy
+- Image: `tecnativa/docker-socket-proxy:0.3.0` (digest-pinned)
+- Network: trap-internal
+- Read-only rootfs: no
+- Purpose: scoped, read-only Docker API gateway (containers section only, writes
+  denied). Lets log-shipper read endlessh container logs without mounting the
+  raw Docker socket, which would otherwise be a direct path to host root.
 
 ### log-shipper
-Image: custom build (services/log-shipper/Dockerfile)
-Network: trap-internal + trap-logs volume
-Capabilities: drop ALL
-Read-only rootfs: yes (except for small state dir)
-Purpose: Reads JSON logs from trap-logs volume, normalizes to shared event schema, writes to intel-store and forwards to Loki.
+- Image: custom build (`services/log-shipper/Dockerfile`)
+- Network: trap-internal
+- Read-only rootfs: yes (tmpfs for /tmp)
+- Purpose: read Cowrie and deception-gw JSONL and endlessh logs (via the
+  socket-proxy), normalize to the shared event schema, write to SQLite, push to
+  Loki.
 
 ### mitre-mapper
-Image: custom build (services/mitre-mapper/Dockerfile)
-Network: trap-internal
-Capabilities: drop ALL
-Read-only rootfs: yes
-Purpose: Loads MITRE ATT&CK technique YAML, matches events to T-codes via regex/heuristics, writes mappings to intel-store.
-
-### intel-store
-Image: python:3.12-slim (or sqlite3 CLI image)
-Network: trap-internal
-Capabilities: drop ALL
-Read-only rootfs: no (needs writable data volume for SQLite)
-Purpose: SQLite database storing sessions, events, techniques, attackers. Queryable by frontend and Grafana.
+- Image: custom build (`services/mitre-mapper/Dockerfile`)
+- Network: trap-internal
+- Read-only rootfs: yes (tmpfs for /tmp)
+- Purpose: load the MITRE technique YAML, map events via static and regex
+  matching, track processed events, and build attacker risk profiles.
 
 ### loki
-Image: grafana/loki:3.0.0 (pin by digest)
-Network: trap-internal
-Capabilities: drop ALL
-Read-only rootfs: no (needs writable data volume)
-Purpose: Log aggregation. Receives logs from log-shipper. Queried by Grafana.
+- Image: `grafana/loki:3.4.2` (digest-pinned)
+- Network: trap-internal
+- Read-only rootfs: no (writable data volume)
+- Purpose: log aggregation. Receives pushes from log-shipper, queried by Grafana.
 
 ### grafana
-Image: grafana/grafana:11.0.0 (pin by digest)
-Ports: ${GRAFANA_PORT}:3000 (dev only, SSH tunnel in prod)
-Network: trap-internal
-Capabilities: drop ALL
-Read-only rootfs: no (needs writable data volume for dashboards)
-Purpose: Dashboard. Visualizes metrics, attack timelines, attacker statistics.
+- Image: `grafana/grafana:11.5.2` (digest-pinned)
+- Host port: `${GRAFANA_PORT}` -> 3000, bound to 127.0.0.1 (SSH tunnel)
+- Networks: trap-internal, trap-external (localhost host port only)
+- Read-only rootfs: no (writable data volume)
+- Purpose: metrics dashboard over Loki. Anonymous access disabled in prod.
 
 ### frontend
-Image: custom build (services/frontend/Dockerfile)
-Ports: ${FRONTEND_PORT}:8001 (dev only, SSH tunnel in prod)
-Network: trap-internal
-Capabilities: drop ALL
-Read-only rootfs: yes (tmpfs for /tmp)
-Purpose: Custom FastAPI frontend serving HTML/JS dashboard. Attack map (Leaflet), MITRE heatmap, session replay, attack timeline.
+- Image: custom build (`services/frontend/Dockerfile`)
+- Host port: `${FRONTEND_PORT}` -> 8001, bound to 127.0.0.1 (SSH tunnel)
+- Networks: trap-external (localhost host port), trap-internal
+- Read-only rootfs: yes (tmpfs for /tmp)
+- Purpose: custom FastAPI SOC dashboard. Reads the SQLite store read-only and
+  serves the Leaflet attack map, MITRE heatmap, session replay, and timeline.
 
 ## Port Mapping
 
-| Service    | Container Port | Dev Host Port | Prod Host Port |
-|------------|----------------|---------------|-----------------|
-| endlessh   | 2222           | 22222         | 22              |
-| cowrie SSH | 2222           | 2222          | 2222            |
-| cowrie Telnet | 2223        | 2223          | 2223            |
-| deception-gw | 8000         | 8080          | 80              |
-| grafana    | 3000           | 3000          | (SSH tunnel)    |
-| frontend   | 8001           | 8001          | (SSH tunnel)    |
+| Service       | Container Port | Dev Host Port | Prod Host Port     |
+|---------------|----------------|---------------|--------------------|
+| host SSH      | n/a            | (your box)    | 22                 |
+| endlessh      | 2222           | 22222         | 22222              |
+| cowrie SSH    | 2222           | 2222          | 2222               |
+| cowrie Telnet | 2223           | 2223          | 2223               |
+| deception-gw  | 8000           | 8080          | 80                 |
+| grafana       | 3000           | 127.0.0.1:3000 | 127.0.0.1 (tunnel) |
+| frontend      | 8001           | 127.0.0.1:8001 | 127.0.0.1 (tunnel) |
 
 ## Data Flow
 
-1. Attacker connects to endlessh, cowrie, or deception-gw
-2. Honeypot service logs interaction as JSON to /var/log/trap-house/
-3. log-shipper reads JSON logs, normalizes to event schema, writes to:
-   a. intel-store (SQLite: sessions, events, attackers)
-   b. Loki (via HTTP push)
-4. mitre-mapper reads new events from intel-store, matches to ATT&CK techniques, writes mappings back
-5. grafana queries Loki for log-based metrics
-6. frontend queries intel-store for attack map, MITRE heatmap, session replay, timeline
-
-## Deception Layers (Phase 2)
-
-### Layer 1: SSH Entry (Cowrie)
-Attacker brute-forces SSH, gets in with weak credentials. Finds a fake filesystem with decoy .env files, config files, and SSH keys.
-
-### Layer 2: Web App (deception-gw)
-Decoy credentials from Layer 1 work on the fake corporate web app. Attacker logs in, finds admin panel with fake user database.
-
-### Layer 3: Database (deception-gw)
-Admin panel has SQL injection vulnerability (intentional). Attacker injects, gets "database dump" of 10,000 fake users with canarytoken-laced emails.
-
-### Layer 4: Webshell (deception-gw)
-Admin panel has file upload. Attacker uploads webshell. Webshell "works" but operates on a fake filesystem. Every command logged.
-
-### Layer 5: API Keys (deception-gw)
-Fake AWS keys planted in .env. When used (outside the honeypot), canarytokens.org triggers an alert. This is the only outbound connection and is toggleable.
+1. Attacker connects to endlessh, cowrie, or deception-gw.
+2. The honeypot logs the interaction as JSON (to the bind mount, or to container
+   stdout for endlessh).
+3. log-shipper reads those logs (endlessh via the socket-proxy), normalizes to
+   the event schema, writes to SQLite, and pushes to Loki.
+4. mitre-mapper reads unprocessed events, maps them to ATT&CK techniques, marks
+   them processed, and updates attacker profiles.
+5. grafana queries Loki for log-based metrics.
+6. frontend queries SQLite for the attack map, heatmap, session replay, timeline.
 
 ## MITRE ATT&CK Mapping Approach
 
-Static YAML file (config/mitre-techniques.yaml) maps event patterns to T-codes:
-- SSH brute force -> T1110 (Brute Force)
-- Credential dumping from files -> T1003 (OS Credential Dumping)
-- SQL injection -> T1190 (Exploit Public-Facing Application)
-- Webshell deployment -> T1505.003 (Server Software Component: Web Shell)
-- Data exfiltration attempt -> T1041 (Exfiltration Over C2 Channel)
+`config/mitre-techniques.yaml` drives two matchers in mitre-mapper:
+- Static event-type mapping (e.g. SSH brute force -> T1110.001, SQL injection ->
+  T1190, webshell -> T1505.003, valid accounts -> T1078).
+- Regex/heuristic pattern matching over event details (e.g. credential file
+  access -> T1003.008, account discovery -> T1087, tool transfer -> T1105).
 
-Matching is regex/heuristic based. No ML. No admin UI for mapping management.
+Matching is deterministic (no ML). Events that match no technique are still
+recorded as processed so the mapper never re-scans them.

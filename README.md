@@ -17,7 +17,7 @@ Most student honeypot projects do one thing: deploy Cowrie, collect some logs, w
 
 ## Architecture
 
-8 Docker containers across 2 isolated networks:
+9 Docker containers across 2 isolated networks:
 
 ```
                         Internet
@@ -55,11 +55,14 @@ Most student honeypot projects do one thing: deploy Cowrie, collect some logs, w
 - **deception-gw**: FastAPI fake corporate web app ("NordTech Solutions"). 5-layer deception maze with login, admin panel, SQL injection, sandboxed webshell, and fake AWS keys.
 
 ### Internal Network (no external access)
+- **socket-proxy**: Scoped, read-only Docker API gateway. Lets log-shipper read Endlessh container logs without mounting the raw Docker socket.
 - **log-shipper**: Reads JSONL logs from all honeypot services, normalizes to a shared event schema, writes to SQLite.
 - **mitre-mapper**: Reads events from SQLite, maps to MITRE ATT&CK techniques using static and regex pattern matching, builds attacker profiles with risk scoring.
-- **frontend**: Custom FastAPI SOC dashboard with Leaflet attack map, MITRE heatmap, session replay, and event timeline.
+- **frontend**: Custom FastAPI SOC dashboard with Leaflet attack map, MITRE heatmap, session replay, and event timeline. Host port bound to 127.0.0.1.
 - **loki**: Grafana Loki log aggregation.
-- **grafana**: Grafana dashboard for log-based metrics.
+- **grafana**: Grafana dashboard for log-based metrics. Host port bound to 127.0.0.1.
+
+The SQLite intel store is a file on a bind mount (`data/db/`), not a container.
 
 ## The Deception Maze
 
@@ -69,7 +72,7 @@ Attackers follow a path that looks like real network compromise but leads in cir
 
 2. **Web Login (deception-gw)**: Decoy credentials from the `.env` file work on the fake NordTech Solutions corporate portal. Progressive authentication delay slows brute force attempts (2^n seconds, capped at 30).
 
-3. **Admin Panel and SQL Injection**: Dashboard leads to admin panel with user search. The search endpoint has an intentional (safe) SQL injection vulnerability. Injection returns 10,000 fake users with canarytoken-laced emails.
+3. **Admin Panel and SQL Injection**: Dashboard leads to admin panel with user search. The search endpoint has an intentional (safe) SQL injection vulnerability. Injection returns 10,000 fake users. Optionally, canary email addresses (on a domain you control, set via `CANARY_EMAIL_DOMAIN`) can be seeded into the dataset to alert if an attacker ever contacts them.
 
 4. **Webshell Upload**: Admin panel accepts file uploads including `.php` webshells. The webshell "works" but executes against an in-memory fake filesystem. Commands like `whoami`, `uname -a`, `cat /etc/passwd` return believable fake output. No real execution.
 
@@ -110,7 +113,7 @@ Every interaction at every layer is logged as JSONL, normalized to the shared ev
 
 ## Tech Stack
 
-- **Docker Compose**: 8-container orchestration, 2 isolated networks
+- **Docker Compose**: 9-container orchestration, 2 isolated networks, images pinned by digest
 - **Cowrie**: SSH/Telnet honeypot with custom honeyfs
 - **Endlessh**: SSH tarpit
 - **Python / FastAPI**: Deception middleware, log shipper, MITRE mapper, frontend API
@@ -125,10 +128,12 @@ Every interaction at every layer is logged as JSONL, normalized to the shared ev
 
 ```
 trap-house/
-  docker-compose.yml          # Dev configuration (8 containers)
-  docker-compose.prod.yml     # Production override (Hetzner)
-  verify.sh                   # Phase 1 verification script
+  docker-compose.yml          # Base configuration (9 containers, digest-pinned)
+  docker-compose.prod.yml     # Production override (fail-closed secrets, Grafana lockdown)
+  verify.sh                   # Smoke-test script for the honeypot layer
   Makefile                    # up, down, logs, test, clean
+  LICENSE                     # MIT license
+  RESULTS.md                  # Findings from the live deployment
   .env.example                # Dev environment config
   .env.hetzner.example        # Production environment config
   CLAUDE.md                   # Project context for AI coding agents
@@ -142,6 +147,8 @@ trap-house/
   deploy/
     harden.sh                 # Host hardening script (firewall, SSH, fail2ban)
     deploy.sh                 # Production deployment script
+    egress-firewall.sh        # Restrict honeypot outbound traffic (anti-pivot)
+    prune-data.sh             # Enforce DB and log retention windows (cron)
   docs/
     PHASE2_DESIGN.md          # Deception middleware design spec
     PHASE4_DESIGN.md          # Dashboard design spec
@@ -175,7 +182,7 @@ git clone <repo-url> trap-house
 cd trap-house
 cp .env.example .env
 
-# Start all 8 containers
+# Start all 9 containers
 make up
 
 # Verify honeypot services are running
@@ -322,20 +329,25 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 ## Security Posture
 
 ### Container Security
-- All containers drop ALL Linux capabilities
-- `no-new-privileges` on every container
-- Cowrie runs as UID 999 (non-root)
-- Deception-gw, frontend, log-shipper, mitre-mapper run as UID 1000 (non-root)
+- All images pinned by sha256 digest (never `:latest`)
+- All containers drop ALL Linux capabilities, `no-new-privileges` on every container
+- `read_only` rootfs on the four Python services (deception-gw, log-shipper, mitre-mapper, frontend)
+- Cowrie runs as UID 999; deception-gw, frontend, log-shipper, mitre-mapper run as UID 1000 (non-root)
+- Per-service memory, PID, and CPU limits; json-file log rotation on every container
+- The log-shipper reads the Docker API through a scoped, read-only socket-proxy, never the raw socket
 - Internal network has `internal: true` (no external internet access)
 - No subprocess, eval, exec, or os.system in any custom code
-- Webshell sandbox is pure in-memory dict lookup, no real execution
+- Webshell sandbox is pure in-memory dict lookup with hard size ceilings, no real execution
+- X-Forwarded-For is ignored unless a trusted proxy is declared, so logged source IPs cannot be spoofed
 
 ### Host Security (Production)
 - UFW firewall: only honeypot ports (80, 2222, 2223, 22222) and host SSH (22) open
 - SSH on port 22, root login disabled, password auth disabled, key-only
 - fail2ban on SSH (3 retries, 2 hour ban)
 - Unattended security upgrades enabled
-- Grafana and frontend accessible only via SSH tunnel (bound to 127.0.0.1)
+- Grafana and frontend accessible only via SSH tunnel (bound to 127.0.0.1); Grafana anonymous access disabled
+- `deploy/egress-firewall.sh` restricts honeypot outbound traffic so a compromised container cannot pivot or exfiltrate
+- `deploy/prune-data.sh` enforces the database and log retention windows
 
 ### Legal
 Norway. Detection and intelligence only. No hack-back, no offensive capabilities. See [LEGAL.md](LEGAL.md).
@@ -350,7 +362,7 @@ This project was built in 5 phases, each producing a deployable artifact:
 4. **Phase 4**: SOC dashboard with Leaflet map, MITRE heatmap, session replay, timeline, Grafana/Loki
 5. **Phase 5**: Production deployment, host hardening, portfolio writeup
 
-Each phase was verified before moving to the next. The verify.sh script runs 8 automated checks against the running stack.
+Each phase was verified before moving to the next. `verify.sh` is a smoke test for the honeypot layer: it starts the stack and checks that Endlessh and Cowrie are listening and logging, and that the container security constraints hold. See [RESULTS.md](RESULTS.md) for findings from the live deployment.
 
 ## Daily Digest
 
@@ -367,4 +379,4 @@ The digest includes total events, unique IPs, 24h deltas, top attackers by risk 
 
 ## License
 
-MIT. See [LEGAL.md](LEGAL.md) for usage guidelines and legal framework.
+MIT. See [LICENSE](LICENSE) for the license text and [LEGAL.md](LEGAL.md) for usage guidelines and the legal framework.

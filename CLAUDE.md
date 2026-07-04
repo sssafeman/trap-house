@@ -7,19 +7,23 @@ A deception honeypot system designed as a cybersecurity portfolio piece. It simu
 Norway. Detection and intelligence only. No hack-back, no offensive capabilities, no malware deployment. See LEGAL.md for full details. "Active antagonism" means defensive deception, detection, and delay. It does NOT mean attacking the attacker.
 
 ## Architecture Overview
-8 containers across 2 Docker networks:
+9 containers across 2 Docker networks:
 
 External (attacker-facing):
-- endlessh: SSH tarpit (port 22 in prod, 22222 in dev)
+- endlessh: SSH tarpit (port 22222; host SSH stays on 22)
 - cowrie: SSH/Telnet honeypot (ports 2222/2223)
-- deception-gw: FastAPI fake corporate web app (port 80/443 in prod, 8080 in dev)
+- deception-gw: FastAPI fake corporate web app (port 80 in prod, 8080 in dev)
 
 Internal (no external access, internal: true):
+- socket-proxy: scoped read-only Docker API gateway for log-shipper
 - log-shipper: normalizes honeypot logs to shared JSON schema
 - mitre-mapper: maps events to ATT&CK T-codes
-- intel-store: SQLite database (sessions, events, techniques, attackers)
 - loki: log aggregation
 - grafana: dashboard (internal only, accessed via SSH tunnel)
+- frontend: custom SOC dashboard (127.0.0.1, accessed via SSH tunnel)
+
+The intel store (SQLite: sessions, events, techniques, attackers) is a file on
+a bind mount at data/db/, not a container.
 
 Data flow: attacker -> honeypot service -> JSON log -> log-shipper -> mitre-mapper + loki -> intel-store -> grafana + frontend
 

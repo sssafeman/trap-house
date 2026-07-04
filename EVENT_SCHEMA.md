@@ -12,7 +12,7 @@ All honeypot services and the log-shipper use this shared JSON schema. Every log
   "source_ip": "203.0.113.45",
   "source_port": 54321,
   "dest_port": 2222,
-  "event_type": "auth_attempt|auth_success|command_exec|file_access|sql_injection|webshell_upload|credential_use|tarpit_connect|tarpit_disconnect",
+  "event_type": "auth_attempt",
   "session_id": "uuid-v4",
   "attacker_fingerprint": {
     "user_agent": "curl/8.0.1",
@@ -26,7 +26,20 @@ All honeypot services and the log-shipper use this shared JSON schema. Every log
 }
 ```
 
-## Event Types
+### Stored columns
+
+The log-shipper writes each event to the `events` table with these additional
+columns pulled out of the raw event for easy querying: `cowrie_session`,
+`protocol` (`ssh` / `http`), `username`, and `command`.
+
+### Event types
+
+The canonical set below is what the services emit and the dashboard reasons
+about. Cowrie produces additional pass-through event types (for example
+`session_connect`, `session_disconnect`, `client_version`, `client_kex`,
+`command_failed`, `file_upload`, `file_download`) that the log-shipper maps
+1:1 from Cowrie's native `eventid`; events matching no MITRE technique are still
+stored and marked processed. The most analytically relevant types are:
 
 ### auth_attempt
 Failed authentication on any honeypot service.
@@ -59,10 +72,8 @@ details: { "credential_type": "aws_key", "credential_id": "AKIA-DECOY-001", "can
 ### tarpit_connect
 Connection accepted by Endlessh tarpit.
 details: { "delay_seconds": 0, "bytes_sent": 0 }
-
-### tarpit_disconnect
-Connection closed or timed out on Endlessh tarpit.
-details: { "duration_seconds": 3600, "bytes_sent": 3600, "disconnect_reason": "timeout|client_disconnect" }
+(The shipper currently parses Endlessh ACCEPT lines only; a matching
+tarpit_disconnect from CLOSE lines is a possible future addition.)
 
 ## Session Tracking
 
@@ -89,5 +100,5 @@ Each honeypot service writes JSONL to /var/log/trap-house/:
 - Endlessh: stdout captured via `docker logs` (no file, read by log-shipper through Docker API)
 
 log-shipper reads these files and writes normalized events to:
-- intel-store (SQLite: events table)
+- the SQLite intel store (`data/db/trap-house.db`, `events` table)
 - Loki (via HTTP push to http://loki:3100/loki/api/v1/push)

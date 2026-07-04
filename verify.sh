@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# verify.sh: Phase 1a verification script.
-# Starts the stack, checks that Endlessh and Cowrie are listening,
-# attempts connections, verifies JSON logs, then tears down.
+# verify.sh: Honeypot-layer smoke test.
+# Starts the stack, checks that all containers come up, that Endlessh and Cowrie
+# are listening and logging, and that the container security constraints hold,
+# then tears down. This is a smoke test, not full end-to-end pipeline coverage.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -60,6 +61,22 @@ if [ "$READY" -ne 1 ]; then
 fi
 
 ok "Both services are listening"
+
+# Test 0: all expected containers are running
+echo ""
+echo "Test: all containers running"
+sleep 3
+EXPECTED="trap-endlessh trap-cowrie trap-deception-gw trap-socket-proxy trap-log-shipper trap-mitre-mapper trap-frontend trap-loki trap-grafana"
+MISSING=""
+for c in $EXPECTED; do
+  STATE=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo "missing")
+  [ "$STATE" = "running" ] || MISSING="${MISSING} ${c}(${STATE})"
+done
+if [ -z "$MISSING" ]; then
+  ok "All 9 containers are running"
+else
+  fail "Containers not running:${MISSING}"
+fi
 
 # Test 1: Endlessh tarpit (connection should stay open, no SSH banner completed)
 echo ""
