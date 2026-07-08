@@ -40,3 +40,6 @@ venv/
 .DS_Store
 Thumbs.db
 digests/
+
+# Captured malware binaries from the honeypot (never commit live samples)
+evidence/
