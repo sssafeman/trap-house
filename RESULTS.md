@@ -191,7 +191,15 @@ Several source IPs ran full discovery sequences after logging in: enumerating th
 
 The custom SOC dashboard visualizes all of the above: a Leaflet attack map of source-IP geolocations, a MITRE ATT&CK heatmap, per-session replay, and a filterable event timeline. Reach it over the SSH tunnel at `http://localhost:8001`.
 
-> Note: screenshots of the attack map, the MITRE heatmap, the Outlaw session replay (130.12.180.51), and top attacker profiles should be added to `docs/img/` to make this section self-contained for readers who are not running the stack.
+![Attack Map](docs/img/attack-map.png)
+
+![MITRE ATT&CK Heatmap](docs/img/mitre-heatmap.png)
+
+![Top Attackers](docs/img/top-attackers.png)
+
+![Outlaw Session Replay](docs/img/session-replay-outlaw.png)
+
+![Full Dashboard](docs/img/dashboard-full-with-outlaw-replay.png)
 
 ## Reproducing these numbers
 
