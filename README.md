@@ -1,64 +1,96 @@
-# Trap House: Multi-Layer Deception Honeypot
+# Trap House
 
-A deception honeypot system designed as a cybersecurity portfolio piece. It simulates a fake company network that draws attackers into an infinite maze of decoy credentials and services. All attacker behavior is logged, mapped to MITRE ATT&CK techniques, and visualized on a threat intelligence dashboard.
+**A multi-layer deception honeypot that lures attackers into an endless maze of decoy services, then maps every move to MITRE ATT&CK.**
 
-## Why This Project
+![Animated kill chain of the Outlaw/RedTail cryptomining intrusion captured by Trap House, rendered as a dark SOC-style motion graphic showing brute force, discovery, tool transfer, persistence, and execution](docs/img/outlaw-killchain.gif)
 
-Most student honeypot projects do one thing: deploy Cowrie, collect some logs, write a report. This project goes further. It builds a multi-layer deception environment that keeps attackers engaged for as long as possible while producing professional-grade threat intelligence.
+*The Outlaw/RedTail cryptomining kill chain, reconstructed from 162 real captured events and rendered with Manim CE. Full analysis in [RESULTS.md](RESULTS.md).*
 
-### Differentiators
+[![CI](https://github.com/sssafeman/trap-house/actions/workflows/ci.yml/badge.svg)](https://github.com/sssafeman/trap-house/actions/workflows/ci.yml)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![MITRE ATT&CK: 11 techniques observed](https://img.shields.io/badge/MITRE%20ATT%26CK-11%20techniques%20observed-red)
 
-- **Custom deception middleware**: Not just deployed Cowrie. A purpose-built FastAPI fake corporate web app with 5 deception layers that route attackers in circles.
-- **MITRE ATT&CK mapping**: Two-layer detection. Static event-type mapping (11 techniques across 15 event mappings) plus regex pattern matching (10 patterns) that catches behavioral indicators like credential dumping, system discovery, and account enumeration.
-- **Attacker profiling with risk scoring**: Per-IP profiles tracking tools detected, MITRE techniques used, session count, and a weighted risk score.
-- **Custom SOC dashboard**: Dark-themed security operations center interface with a Leaflet attack map, MITRE heatmap, session replay showing attacker journey through deception layers, and a filterable event timeline.
-- **Sandboxed webshell**: File upload accepts webshells but executes against an in-memory fake filesystem. No real code execution, no subprocess, no eval. Every command is logged.
-- **Legal by design**: Built for the Norwegian legal context. Detection and intelligence only. No hack-back, no offensive capabilities. See [LEGAL.md](LEGAL.md).
+Trap House simulates a fake company network that draws attackers into an infinite loop of decoy credentials and services. All attacker behavior is logged, mapped to MITRE ATT&CK techniques, and visualized on a custom threat intelligence dashboard. Detection and intelligence only: no hack-back, no offensive capability. Built for the Norwegian legal context ([LEGAL.md](LEGAL.md)).
+
+## Live Results: 9 Days on the Open Internet
+
+Captured in 9 days of live internet-facing deployment (2026-06-30 to 2026-07-08) on a public VPS:
+
+| Metric | Value |
+|-|-|
+| Total events captured | 31,788 |
+| Unique attacker IP addresses | 416 |
+| Distinct sessions | 6,886 |
+| MITRE ATT&CK techniques observed | 11 |
+| Events in the last 24 hours | 3,534 |
+| Successful brute-force logins | 144 of 5,678 attempts (roughly 2.5%) |
+
+![Dashboard stats bar showing live totals for events, unique attackers, sessions, and MITRE techniques](docs/img/stats-bar.png)
+
+> **Case study: Outlaw/RedTail cryptomining campaign.** A single IP, 130.12.180.51 (Saudi Arabia), executed a complete kill chain against the honeypot: 162 events across 18 sessions, 8 MITRE ATT&CK techniques. It brute-forced root, fingerprinted the architecture with `uname`, uploaded 6 malware binaries over SFTP, injected an SSH key locked with `chattr +ai`, and ran a dropper. The delivered `redtail.x86_64` binary scores 37/64 on VirusTotal and matches ThreatFox IOC 1820703 at 85% confidence. The honeypot logged everything and executed nothing. Full breakdown with file hashes and script analysis in [RESULTS.md](RESULTS.md).
+
+![Session replay panel reconstructing the Outlaw attacker's step-by-step path: SSH brute force, login, discovery commands, SFTP uploads, and dropper execution](docs/img/session-replay-outlaw.png)
+
+## What Makes It Different
+
+Most student honeypot projects deploy Cowrie, collect some logs, and write a report. Trap House builds a full deception environment that keeps attackers engaged and produces professional-grade threat intelligence:
+
+- **Custom deception middleware**: a purpose-built FastAPI fake corporate web app with 5 deception layers that route attackers in circles.
+- **MITRE ATT&CK mapping**: two-layer detection. Static event-type mapping (11 techniques across 15 event mappings) plus regex pattern matching (10 patterns) that catches behavioral indicators like credential dumping, system discovery, and account enumeration.
+- **Attacker profiling with risk scoring**: per-IP profiles tracking tools detected, MITRE techniques used, session count, and a weighted risk score.
+- **Custom SOC dashboard**: dark-themed security operations center interface with a Leaflet attack map, MITRE heatmap, session replay showing the attacker's journey through the deception layers, and a filterable event timeline.
+- **Sandboxed webshell**: file upload accepts webshells but executes against an in-memory fake filesystem. No real code execution, no subprocess, no eval. Every command is logged.
+- **Legal by design**: built for the Norwegian legal context. Detection and intelligence only. No hack-back, no offensive capabilities. See [LEGAL.md](LEGAL.md).
 
 ## Architecture
 
-9 Docker containers across 2 isolated networks:
+9 Docker containers across 2 isolated networks. Full topology and data flow in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```
                         Internet
-                           |
-                    +------+------+
-                    |             |
-              trap-external       |
-                    |             |
-           +--------+--+--+------+--------+
-           |           |  |               |
-       endlessh       cowrie         deception-gw
-       (tarpit)     (honeypot)        (FastAPI)
-           |           |  |               |
-           +-----+-----+--+---------------+
-                 |
-          trap-logs (bind mounts)
-                 |
-         +-------+--------+
-         |                |
-    log-shipper      mitre-mapper
-         |                |
-         v                v
-    SQLite DB       techniques table
-    events table    attackers table
-         |
-    +----+----+
-    |         |
-  frontend   grafana+loki
-  (SOC UI)   (metrics)
+                           │
+                    ┌──────┴──────┐
+                    │             │
+              trap-external       │
+                    │             │
+           ┌────────┼──┬──────────┴───────┐
+           │        │  │                  │
+       endlessh    cowrie           deception-gw
+       (tarpit)   (honeypot)          (FastAPI)
+           │        │  │                  │
+           └────┬───┴──┴──────────────────┘
+                │
+         trap-logs (bind mounts)
+                │
+        ┌───────┴────────┐
+        │                │
+   log-shipper      mitre-mapper
+        │                │
+        ▼                ▼
+   SQLite DB       techniques table
+   events table    attackers table
+        │
+   ┌────┴────┐
+   │         │
+ frontend   grafana + loki
+ (SOC UI)   (metrics)
 ```
 
-### External Network (attacker-facing)
-- **endlessh**: SSH tarpit. Accepts connections and drip-feeds a fake banner at 1 byte/second.
-- **cowrie**: SSH/Telnet honeypot. Accepts credentials, provides fake shell, logs all interaction as JSON. Serves a custom honeyfs with decoy `.env` files containing credentials that work on the web app.
+### External network (attacker-facing)
+
+- **endlessh**: SSH tarpit. Accepts connections and drip-feeds a fake banner at 1 byte per second.
+- **cowrie**: SSH/Telnet honeypot. Accepts credentials, provides a fake shell, logs all interaction as JSON. Serves a custom honeyfs with decoy `.env` files containing credentials that work on the web app.
 - **deception-gw**: FastAPI fake corporate web app ("NordTech Solutions"). 5-layer deception maze with login, admin panel, SQL injection, sandboxed webshell, and fake AWS keys.
 
-### Internal Network (no external access)
-- **socket-proxy**: Scoped, read-only Docker API gateway. Lets log-shipper read Endlessh container logs without mounting the raw Docker socket.
-- **log-shipper**: Reads JSONL logs from all honeypot services, normalizes to a shared event schema, writes to SQLite.
-- **mitre-mapper**: Reads events from SQLite, maps to MITRE ATT&CK techniques using static and regex pattern matching, builds attacker profiles with risk scoring.
-- **frontend**: Custom FastAPI SOC dashboard with Leaflet attack map, MITRE heatmap, session replay, and event timeline. Host port bound to 127.0.0.1.
+### Internal network (no external access)
+
+- **socket-proxy**: scoped, read-only Docker API gateway. Lets log-shipper read Endlessh container logs without mounting the raw Docker socket.
+- **log-shipper**: reads JSONL logs from all honeypot services, normalizes them to a shared event schema ([EVENT_SCHEMA.md](EVENT_SCHEMA.md)), writes to SQLite.
+- **mitre-mapper**: reads events from SQLite, maps them to MITRE ATT&CK techniques using static and regex pattern matching, builds attacker profiles with risk scoring.
+- **frontend**: custom FastAPI SOC dashboard with Leaflet attack map, MITRE heatmap, session replay, and event timeline. Host port bound to 127.0.0.1.
 - **loki**: Grafana Loki log aggregation.
 - **grafana**: Grafana dashboard for log-based metrics. Host port bound to 127.0.0.1.
 
@@ -68,23 +100,42 @@ The SQLite intel store is a file on a bind mount (`data/db/`), not a container.
 
 Attackers follow a path that looks like real network compromise but leads in circles:
 
-1. **SSH Entry (Cowrie)**: Attacker brute-forces SSH, gets in with weak credentials. Finds a fake filesystem with `/home/admin/.env` containing database and web app credentials.
-
-2. **Web Login (deception-gw)**: Decoy credentials from the `.env` file work on the fake NordTech Solutions corporate portal. Progressive authentication delay slows brute force attempts (2^n seconds, capped at 30).
-
-3. **Admin Panel and SQL Injection**: Dashboard leads to admin panel with user search. The search endpoint has an intentional (safe) SQL injection vulnerability. Injection returns 10,000 fake users. Optionally, canary email addresses (on a domain you control, set via `CANARY_EMAIL_DOMAIN`) can be seeded into the dataset to alert if an attacker ever contacts them.
-
-4. **Webshell Upload**: Admin panel accepts file uploads including `.php` webshells. The webshell "works" but executes against an in-memory fake filesystem. Commands like `whoami`, `uname -a`, `cat /etc/passwd` return believable fake output. No real execution.
-
-5. **Fake AWS Keys and Maze Loop**: Admin config page shows fake AWS access keys. Admin backup page shows database credentials that lead back to the login page. The attacker goes in circles.
+1. **SSH entry (Cowrie)**: the attacker brute-forces SSH and gets in with weak credentials. They find a fake filesystem with `/home/admin/.env` containing database and web app credentials.
+2. **Web login (deception-gw)**: decoy credentials from the `.env` file work on the fake NordTech Solutions corporate portal. Progressive authentication delay slows brute force attempts (2^n seconds, capped at 30).
+3. **Admin panel and SQL injection**: the dashboard leads to an admin panel with user search. The search endpoint has an intentional (safe) SQL injection vulnerability. Injection returns 10,000 fake users. Optionally, canary email addresses (on a domain you control, set via `CANARY_EMAIL_DOMAIN`) can be seeded into the dataset to alert if an attacker ever contacts them.
+4. **Webshell upload**: the admin panel accepts file uploads including `.php` webshells. The webshell "works" but executes against an in-memory fake filesystem. Commands like `whoami`, `uname -a`, `cat /etc/passwd` return believable fake output. No real execution.
+5. **Fake AWS keys and maze loop**: the admin config page shows fake AWS access keys. The admin backup page shows database credentials that lead back to the login page. The attacker goes in circles.
 
 Every interaction at every layer is logged as JSONL, normalized to the shared event schema, and mapped to MITRE ATT&CK techniques.
 
+## The SOC Dashboard
+
+A custom FastAPI frontend (vanilla JS, no build step) visualizes everything the honeypot captures. Reached over an SSH tunnel in production.
+
+![Full SOC dashboard: dark-themed threat intelligence interface with stats bar, world attack map, MITRE heatmap, top attackers panel, and event timeline](docs/img/dashboard-full.png)
+
+The Leaflet attack map plots attacker source geolocations on CartoDB Dark Matter tiles:
+
+![World attack map with red markers on attacker source locations, concentrated across Asia, Europe, and North America](docs/img/attack-map.png)
+
+Attacker profiling ranks source IPs by a weighted risk score built from techniques used, tools detected, and session behavior:
+
+![Top attackers panel listing source IPs ranked by risk score with country, session count, and technique count](docs/img/top-attackers.png)
+
+The event timeline shows attack volume over time and supports filtering by event type and source:
+
+![Event timeline bar chart showing honeypot event volume over the deployment window](docs/img/attack-timeline.png)
+
 ## MITRE ATT&CK Coverage
 
-### Static Event-Type Mapping (11 techniques, 15 event mappings)
+The mapper heatmap on the dashboard shows observed technique frequency across tactics:
+
+![MITRE ATT&CK heatmap grid with observed techniques colored by hit count across tactic columns](docs/img/mitre-heatmap.png)
+
+### Static event-type mapping (11 techniques, 15 event mappings)
+
 | Technique | Name | Tactic |
-|-----------|------|--------|
+|-|-|-|
 | T1110.001 | Brute Force: Password Guessing | Credential Access |
 | T1078 | Valid Accounts | Defense Evasion |
 | T1059 | Command and Scripting Interpreter | Execution |
@@ -97,9 +148,10 @@ Every interaction at every layer is logged as JSONL, normalized to the shared ev
 | T1021 | Remote Services | Lateral Movement |
 | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance |
 
-### Regex Pattern Matching (10 patterns)
+### Regex pattern matching (10 patterns)
+
 | Technique | Trigger |
-|-----------|---------|
+|-|-|
 | T1110.004 | Credential stuffing tools (hydra, medusa, ncrack) |
 | T1190 | Exploitation tools (sqlmap, nikto, nuclei, metasploit) |
 | T1059.004 | Shell invocation (/bin/sh, powershell) |
@@ -116,13 +168,14 @@ Every interaction at every layer is logged as JSONL, normalized to the shared ev
 - **Docker Compose**: 9-container orchestration, 2 isolated networks, images pinned by digest
 - **Cowrie**: SSH/Telnet honeypot with custom honeyfs
 - **Endlessh**: SSH tarpit
-- **Python / FastAPI**: Deception middleware, log shipper, MITRE mapper, frontend API
-- **SQLite**: Intel store (events, sessions, techniques, attackers)
-- **Grafana + Loki**: Log aggregation and time-series metrics
-- **Leaflet.js 1.9.4**: Attack map with CartoDB Dark Matter tiles
-- **Vanilla JS**: No frontend framework, no build step
-- **itsdangerous**: Signed session cookies for the deception maze
+- **Python 3.12 / FastAPI**: deception middleware, log shipper, MITRE mapper, frontend API
+- **SQLite**: intel store (events, sessions, techniques, attackers)
+- **Grafana + Loki**: log aggregation and time-series metrics
+- **Leaflet.js 1.9.4**: attack map with CartoDB Dark Matter tiles
+- **Vanilla JS**: no frontend framework, no build step
+- **itsdangerous**: signed session cookies for the deception maze
 - **PyYAML**: MITRE technique configuration
+- **Manim CE**: kill chain animation rendered from captured session data
 
 ## Project Structure
 
@@ -140,6 +193,9 @@ trap-house/
   ARCHITECTURE.md             # System topology and data flow
   EVENT_SCHEMA.md             # Shared JSONL event schema
   LEGAL.md                    # Norwegian legal framework
+  .github/workflows/ci.yml    # CI: byte-compile, compose validation, ShellCheck
+  animations/
+    outlaw_killchain.py       # Manim CE kill chain animation source
   config/
     mitre-techniques.yaml     # MITRE ATT&CK technique mappings
     grafana/
@@ -152,6 +208,9 @@ trap-house/
   docs/
     PHASE2_DESIGN.md          # Deception middleware design spec
     PHASE4_DESIGN.md          # Dashboard design spec
+    img/                      # Dashboard screenshots and kill chain animation
+  scripts/
+    digest.sh                 # Daily stats digest (cron)
   services/
     cowrie/
       cowrie.cfg              # Cowrie configuration overrides
@@ -178,7 +237,7 @@ trap-house/
 
 ```bash
 # Clone and configure
-git clone <repo-url> trap-house
+git clone https://github.com/sssafeman/trap-house
 cd trap-house
 cp .env.example .env
 
@@ -203,9 +262,8 @@ Recommended path for students. $200 credit covers 6+ months of a $32/mo droplet.
 # 1. Create droplet: Frankfurt, Ubuntu 24.04, $32/mo Premium Intel (2 vCPU, 4GB RAM)
 #    Add SSH key at creation. Skip backups, managed DB, extra volume.
 
-# 2. SSH in, wait for cloud-init, clone repo
+# 2. SSH in, give cloud-init a minute or two to finish, then clone
 ssh root@your-vps-ip
-cloud-init status --wait
 apt-get update && apt-get install -y git
 git clone https://github.com/sssafeman/trap-house /opt/trap-house
 
@@ -232,28 +290,20 @@ cp .env.hetzner.example .env.hetzner
 #   DOCKER_GID=$(getent group docker | cut -d: -f3)
 nano .env.hetzner
 
-# 7. Pre-create data directories with correct ownership
-mkdir -p data/logs/cowrie data/logs/deception-gw data/db data/loki data/grafana
-chown -R 999:999 data/logs/cowrie
-chown -R 1000:1000 data/logs/deception-gw data/db
-chown -R 10001:10001 data/loki
-chown -R 472:472 data/grafana
-chmod -R a+rX config/grafana/provisioning
+# 7. Deploy (creates data directories, builds images, starts and verifies the stack)
+sudo bash deploy/deploy.sh
 
-# 8. Deploy
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d
-
-# 9. Access dashboards via SSH tunnel
+# 8. Access dashboards via SSH tunnel
 ssh -L 8001:localhost:8001 -L 3000:localhost:3000 your_username@your-vps-ip
 # Then open:
 #   http://localhost:8001  (SOC Dashboard)
 #   http://localhost:3000  (Grafana, login: admin / your GRAFANA_ADMIN_PASSWORD)
 ```
 
-### Production Port Mapping (deployed layout)
+### Production port mapping (deployed layout)
 
 | Port | Service | Exposure |
-|------|---------|----------|
+|-|-|-|
 | 22 | Host SSH (admin, key-only, root disabled) | External |
 | 80 | Deception-gw (fake web app) | External |
 | 2222 | Cowrie SSH honeypot | External |
@@ -264,11 +314,11 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 your_username@your-vps-ip
 
 ## Production Deployment (Oracle Cloud Free Tier)
 
-Oracle Cloud offers a permanently free tier with ARM instances (Ampere A1, up to 24GB RAM). This is sufficient for the full 8-container stack.
+Oracle Cloud offers a permanently free tier with ARM instances (Ampere A1, up to 24GB RAM). This is sufficient for the full 9-container stack.
 
-### Oracle Cloud Setup
+### Oracle Cloud setup
 
-1. Sign up at cloud.oracle.com (requires credit card for verification, not charged)
+1. Sign up at cloud.oracle.com (requires a credit card for verification, not charged).
 
 2. Create a compute instance:
    - Shape: VM.Standard.A1.Flex (ARM, Ampere A1)
@@ -282,14 +332,17 @@ Oracle Cloud offers a permanently free tier with ARM instances (Ampere A1, up to
    - Port 2222: Cowrie SSH
    - Port 2223: Cowrie Telnet
    - Port 22222: Endlessh tarpit
+
    Oracle's cloud firewall blocks all ports by default. UFW on the host is not enough.
 
 4. SSH into the instance (Oracle uses `ubuntu` as the default user):
+
 ```bash
 ssh ubuntu@your-oracle-ip
 ```
 
 5. Clone and harden:
+
 ```bash
 sudo apt-get update && sudo apt-get install -y git
 git clone https://github.com/sssafeman/trap-house /opt/trap-house
@@ -298,21 +351,24 @@ sudo bash deploy/harden.sh ubuntu
 ```
 
 6. Reconnect after hardening (admin SSH stays on port 22 unless you changed it):
+
 ```bash
 ssh ubuntu@your-oracle-ip
 ```
 
 7. Configure and deploy:
+
 ```bash
 cd /opt/trap-house
 cp .env.hetzner.example .env.hetzner
 # Edit .env.hetzner: set SESSION_SECRET and GRAFANA_ADMIN_PASSWORD
 # Generate SESSION_SECRET: python3 -c "import secrets; print(secrets.token_hex(32))"
 nano .env.hetzner
-bash deploy/deploy.sh
+sudo bash deploy/deploy.sh
 ```
 
 8. Access dashboards via SSH tunnel:
+
 ```bash
 ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 # Then open:
@@ -320,7 +376,8 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 #   http://localhost:3000  (Grafana)
 ```
 
-### Oracle Cloud Notes
+### Oracle Cloud notes
+
 - All Docker images in this project support ARM64 (Ampere A1). No architecture changes needed.
 - Oracle may reclaim idle free tier instances. A honeypot receiving traffic should stay active.
 - Bandwidth limit: 10 TB/month outbound. Honeypot log traffic will not approach this.
@@ -328,7 +385,8 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 
 ## Security Posture
 
-### Container Security
+### Container security
+
 - All images pinned by sha256 digest (never `:latest`)
 - All containers drop ALL Linux capabilities, `no-new-privileges` on every container
 - `read_only` rootfs on the four Python services (deception-gw, log-shipper, mitre-mapper, frontend)
@@ -340,7 +398,8 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 - Webshell sandbox is pure in-memory dict lookup with hard size ceilings, no real execution
 - X-Forwarded-For is ignored unless a trusted proxy is declared, so logged source IPs cannot be spoofed
 
-### Host Security (Production)
+### Host security (production)
+
 - UFW firewall: only honeypot ports (80, 2222, 2223, 22222) and host SSH (22) open
 - SSH on port 22, root login disabled, password auth disabled, key-only
 - fail2ban on SSH (3 retries, 2 hour ban)
@@ -350,17 +409,18 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 - `deploy/prune-data.sh` enforces the database and log retention windows
 
 ### Legal
+
 Norway. Detection and intelligence only. No hack-back, no offensive capabilities. See [LEGAL.md](LEGAL.md).
 
-## Building This Project
+## How It Was Built
 
 This project was built in 5 phases, each producing a deployable artifact:
 
 1. **Phase 1**: Docker Compose skeleton, Cowrie, Endlessh, log-shipper to SQLite
-2. **Phase 2**: Deception middleware (FastAPI 5-layer maze, sandboxed webshell, SQL injection)
+2. **Phase 2**: deception middleware (FastAPI 5-layer maze, sandboxed webshell, SQL injection)
 3. **Phase 3**: MITRE mapper with regex patterns and attacker profiling
 4. **Phase 4**: SOC dashboard with Leaflet map, MITRE heatmap, session replay, timeline, Grafana/Loki
-5. **Phase 5**: Production deployment, host hardening, portfolio writeup
+5. **Phase 5**: production deployment, host hardening, portfolio writeup
 
 Each phase was verified before moving to the next. `verify.sh` is a smoke test for the honeypot layer: it starts the stack and checks that Endlessh and Cowrie are listening and logging, and that the container security constraints hold. See [RESULTS.md](RESULTS.md) for findings from the live deployment.
 
@@ -380,3 +440,5 @@ The digest includes total events, unique IPs, 24h deltas, top attackers by risk 
 ## License
 
 MIT. See [LICENSE](LICENSE) for the license text and [LEGAL.md](LEGAL.md) for usage guidelines and the legal framework.
+
+Built by Said ([sssafeman](https://github.com/sssafeman)).
