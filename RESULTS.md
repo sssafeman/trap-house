@@ -199,6 +199,8 @@ The custom SOC dashboard visualizes all of the above: a Leaflet attack map of so
 
 ![Outlaw Session Replay](docs/img/session-replay-outlaw.png)
 
+![Outlaw Kill Chain Animation](docs/img/outlaw-killchain.gif)
+
 ![Full Dashboard](docs/img/dashboard-full-with-outlaw-replay.png)
 
 ## Reproducing these numbers
