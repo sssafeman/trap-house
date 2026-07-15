@@ -19,11 +19,10 @@ import sqlite3
 import subprocess
 import time
 import urllib.request
-import urllib.error
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # Configuration
 LOG_DIR = Path(os.environ.get("LOG_DIR", "/var/log/trap-house"))
@@ -71,6 +70,101 @@ MITRE_MAP: dict[str, tuple[str, str]] = {
     "file_access": ("T1083", "discovery"),
 }
 
+COWRIE_FINGERPRINT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("version", "ssh_client"),
+    ("hassh", "hassh"),
+    ("hasshAlgorithms", "hassh_algorithms"),
+    ("kexAlgs", "kex_algorithms"),
+    ("keyAlgs", "key_algorithms"),
+)
+
+COWRIE_DETAIL_FIELDS: tuple[tuple[str, str], ...] = (
+    ("duration_ms", "duration_ms"),
+    ("filename", "filename"),
+    ("outfile", "outfile"),
+    ("shasum", "shasum"),
+    ("url", "url"),
+    ("dst_ip", "dst_ip"),
+    ("dst_port", "dst_port"),
+    ("input", "input"),
+    ("width", "terminal_width"),
+    ("height", "terminal_height"),
+    ("arch", "arch"),
+    ("size", "size"),
+    ("duplicate", "duplicate"),
+)
+
+EVENT_FIELDS: tuple[str, ...] = (
+    "event_id",
+    "timestamp",
+    "source_service",
+    "source_ip",
+    "source_port",
+    "dest_port",
+    "event_type",
+    "session_id",
+    "cowrie_session",
+    "protocol",
+    "username",
+    "command",
+    "attacker_fingerprint",
+    "mitre_technique",
+    "mitre_tactic",
+    "details",
+    "raw_data",
+)
+
+DATABASE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS events (
+    event_id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    source_service TEXT NOT NULL,
+    source_ip TEXT,
+    source_port INTEGER,
+    dest_port INTEGER,
+    event_type TEXT NOT NULL,
+    session_id TEXT,
+    cowrie_session TEXT,
+    protocol TEXT,
+    username TEXT,
+    command TEXT,
+    attacker_fingerprint TEXT,
+    mitre_technique TEXT,
+    mitre_tactic TEXT,
+    details TEXT,
+    raw_data TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    source_ip TEXT,
+    source_service TEXT,
+    start_time TEXT,
+    end_time TEXT,
+    event_count INTEGER DEFAULT 0,
+    mitre_techniques TEXT,
+    layers_reached TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
+CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_source_ip ON sessions(source_ip);
+"""
+
+EVENT_INSERT_SQL = f"""
+INSERT OR IGNORE INTO events ({", ".join(EVENT_FIELDS)})
+VALUES ({", ".join("?" for _ in EVENT_FIELDS)})
+"""
+
+SESSION_INSERT_SQL = """
+INSERT INTO sessions (
+    session_id, source_ip, source_service, start_time,
+    end_time, event_count, mitre_techniques, layers_reached
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
 
 def stable_event_id(source: str, payload: str) -> str:
     """Derive a deterministic event_id from the raw event content.
@@ -90,48 +184,66 @@ def get_db() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
 
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS events (
-            event_id TEXT PRIMARY KEY,
-            timestamp TEXT NOT NULL,
-            source_service TEXT NOT NULL,
-            source_ip TEXT,
-            source_port INTEGER,
-            dest_port INTEGER,
-            event_type TEXT NOT NULL,
-            session_id TEXT,
-            cowrie_session TEXT,
-            protocol TEXT,
-            username TEXT,
-            command TEXT,
-            attacker_fingerprint TEXT,
-            mitre_technique TEXT,
-            mitre_tactic TEXT,
-            details TEXT,
-            raw_data TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            source_ip TEXT,
-            source_service TEXT,
-            start_time TEXT,
-            end_time TEXT,
-            event_count INTEGER DEFAULT 0,
-            mitre_techniques TEXT,
-            layers_reached TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-        CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
-        CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
-        CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-        CREATE INDEX IF NOT EXISTS idx_sessions_source_ip ON sessions(source_ip);
-        """
-    )
+    conn.executescript(DATABASE_SCHEMA)
     conn.commit()
     return conn
+
+
+def _copy_present_fields(
+    raw: dict[str, Any],
+    fields: tuple[tuple[str, str], ...],
+) -> dict[str, Any]:
+    """Copy present source fields to their normalized names in order."""
+    return {
+        normalized_name: raw[source_name]
+        for source_name, normalized_name in fields
+        if source_name in raw
+    }
+
+
+def _detect_cowrie_tool(ssh_version: str) -> str:
+    """Classify a Cowrie SSH client version using the existing heuristics."""
+    normalized_version = ssh_version.lower()
+    if "libssh" in normalized_version:
+        return "libssh-based"
+    if "openssh" in normalized_version:
+        return "openssh"
+    if "putty" in normalized_version:
+        return "putty"
+    return "unknown"
+
+
+def _build_cowrie_fingerprint(raw: dict[str, Any]) -> dict[str, Any]:
+    """Extract ordered SSH fingerprint fields and the detected tool."""
+    fingerprint = _copy_present_fields(raw, COWRIE_FINGERPRINT_FIELDS)
+    fingerprint["tool"] = _detect_cowrie_tool(raw.get("version", ""))
+    return fingerprint
+
+
+def _build_cowrie_details(
+    raw: dict[str, Any],
+    cowrie_event_id: str,
+) -> dict[str, Any]:
+    """Extract event-specific Cowrie detail fields in storage order."""
+    details: dict[str, Any] = {}
+    if "password" in raw:
+        details["password"] = "[REDACTED]"
+
+    for source_name, normalized_name in COWRIE_DETAIL_FIELDS:
+        if source_name not in raw:
+            continue
+        if (
+            source_name == "dst_port"
+            and not cowrie_event_id.startswith("cowrie.direct-tcpip")
+        ):
+            continue
+        details[normalized_name] = raw[source_name]
+    return details
+
+
+def _mitre_mapping(event_type: str) -> tuple[str, str]:
+    """Return the configured technique and tactic for an event type."""
+    return MITRE_MAP.get(event_type, ("", ""))
 
 
 def normalize_cowrie(raw: dict[str, Any]) -> dict[str, Any]:
@@ -149,66 +261,9 @@ def normalize_cowrie(raw: dict[str, Any]) -> dict[str, Any]:
     username = raw.get("username", "")
     command = raw.get("input", "")
 
-    # Build attacker fingerprint
-    fingerprint: dict[str, Any] = {}
-    if "version" in raw:
-        fingerprint["ssh_client"] = raw["version"]
-    if "hassh" in raw:
-        fingerprint["hassh"] = raw["hassh"]
-    if "hasshAlgorithms" in raw:
-        fingerprint["hassh_algorithms"] = raw["hasshAlgorithms"]
-    if "kexAlgs" in raw:
-        fingerprint["kex_algorithms"] = raw["kexAlgs"]
-    if "keyAlgs" in raw:
-        fingerprint["key_algorithms"] = raw["keyAlgs"]
-
-    # Tool fingerprinting (basic heuristics)
-    tool = "unknown"
-    ssh_version = raw.get("version", "")
-    if "libssh" in ssh_version.lower():
-        tool = "libssh-based"
-    elif "openssh" in ssh_version.lower():
-        tool = "openssh"
-    elif "putty" in ssh_version.lower():
-        tool = "putty"
-    fingerprint["tool"] = tool
-
-    # MITRE mapping
-    mitre_technique = ""
-    mitre_tactic = ""
-    if event_type in MITRE_MAP:
-        mitre_technique, mitre_tactic = MITRE_MAP[event_type]
-
-    # Build details dict
-    details: dict[str, Any] = {}
-    if "password" in raw:
-        details["password"] = "[REDACTED]"
-    if "duration_ms" in raw:
-        details["duration_ms"] = raw["duration_ms"]
-    if "filename" in raw:
-        details["filename"] = raw["filename"]
-    if "outfile" in raw:
-        details["outfile"] = raw["outfile"]
-    if "shasum" in raw:
-        details["shasum"] = raw["shasum"]
-    if "url" in raw:
-        details["url"] = raw["url"]
-    if "dst_ip" in raw:
-        details["dst_ip"] = raw["dst_ip"]
-    if "dst_port" in raw and cowrie_event_id.startswith("cowrie.direct-tcpip"):
-        details["dst_port"] = raw["dst_port"]
-    if "input" in raw:
-        details["input"] = raw["input"]
-    if "width" in raw:
-        details["terminal_width"] = raw["width"]
-    if "height" in raw:
-        details["terminal_height"] = raw["height"]
-    if "arch" in raw:
-        details["arch"] = raw["arch"]
-    if "size" in raw:
-        details["size"] = raw["size"]
-    if "duplicate" in raw:
-        details["duplicate"] = raw["duplicate"]
+    fingerprint = _build_cowrie_fingerprint(raw)
+    details = _build_cowrie_details(raw, cowrie_event_id)
+    mitre_technique, mitre_tactic = _mitre_mapping(event_type)
 
     return {
         "event_id": stable_event_id("cowrie", json.dumps(raw, sort_keys=True)),
@@ -231,41 +286,73 @@ def normalize_cowrie(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _parse_endlessh_connection(line: str) -> tuple[str, str]:
+    """Extract the last host and port values from an Endlessh log line."""
+    host = ""
+    port = ""
+    for part in line.split():
+        if part.startswith("host="):
+            host = part[5:]
+        elif part.startswith("port="):
+            port = part[5:]
+    if host.startswith("::ffff:"):
+        host = host[7:]
+    return host, port
+
+
 def normalize_endlessh(line: str) -> dict[str, Any] | None:
     """Parse Endlessh log lines. Endlessh logs ACCEPT and CLOSE lines to stdout,
     which the shipper reads via `docker logs` (see get_endlessh_logs)."""
-    if "ACCEPT" in line:
-        parts = line.split()
-        host = ""
-        port = ""
-        for p in parts:
-            if p.startswith("host="):
-                host = p[5:]
-            elif p.startswith("port="):
-                port = p[5:]
-        # Strip IPv6 prefix if present
-        if host.startswith("::ffff:"):
-            host = host[7:]
-        return {
-            "event_id": stable_event_id("endlessh", line),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "source_service": "endlessh",
-            "source_ip": host,
-            "source_port": int(port) if port else None,
-            "dest_port": ENDLESSH_DEST_PORT,
-            "event_type": "tarpit_connect",
-            "session_id": stable_event_id("endlessh-session", line),
-            "cowrie_session": None,
-            "protocol": "ssh",
-            "username": None,
-            "command": None,
-            "attacker_fingerprint": json.dumps({"tool": "unknown"}),
-            "mitre_technique": "",
-            "mitre_tactic": "",
-            "details": json.dumps({"delay_seconds": 0, "bytes_sent": 0}),
-            "raw_data": json.dumps({"raw_line": line}),
-        }
-    return None
+    if "ACCEPT" not in line:
+        return None
+
+    host, port = _parse_endlessh_connection(line)
+    return {
+        "event_id": stable_event_id("endlessh", line),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source_service": "endlessh",
+        "source_ip": host,
+        "source_port": int(port) if port else None,
+        "dest_port": ENDLESSH_DEST_PORT,
+        "event_type": "tarpit_connect",
+        "session_id": stable_event_id("endlessh-session", line),
+        "cowrie_session": None,
+        "protocol": "ssh",
+        "username": None,
+        "command": None,
+        "attacker_fingerprint": json.dumps({"tool": "unknown"}),
+        "mitre_technique": "",
+        "mitre_tactic": "",
+        "details": json.dumps({"delay_seconds": 0, "bytes_sent": 0}),
+        "raw_data": json.dumps({"raw_line": line}),
+    }
+
+
+def _detect_deception_tool(user_agent: str) -> str:
+    """Classify a deception gateway user agent using existing labels."""
+    normalized_user_agent = user_agent.lower()
+    if "sqlmap" in normalized_user_agent:
+        return "sqlmap"
+    if "curl" in normalized_user_agent:
+        return "curl"
+    if "python" in normalized_user_agent:
+        return "python-script"
+    return "browser"
+
+
+def _build_deception_fingerprint(raw_fingerprint: Any) -> dict[str, Any]:
+    """Normalize the nested deception gateway fingerprint."""
+    fingerprint: dict[str, Any] = {}
+    user_agent = raw_fingerprint.get("user_agent", "")
+    if user_agent:
+        fingerprint["user_agent"] = user_agent
+
+    tool = raw_fingerprint.get("tool", "")
+    if tool:
+        fingerprint["tool"] = tool
+    elif user_agent:
+        fingerprint["tool"] = _detect_deception_tool(user_agent)
+    return fingerprint
 
 
 def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
@@ -276,11 +363,7 @@ def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
     source_ip = raw.get("source_ip", "")
     session_id = raw.get("session_id", str(uuid.uuid4()))
 
-    # MITRE mapping
-    mitre_technique = ""
-    mitre_tactic = ""
-    if event_type in MITRE_MAP:
-        mitre_technique, mitre_tactic = MITRE_MAP[event_type]
+    mitre_technique, mitre_tactic = _mitre_mapping(event_type)
 
     # deception-gw nests its fingerprint under "attacker_fingerprint" and its
     # per-event fields under "details" (see deception-gw/logger.py). Read from
@@ -288,23 +371,7 @@ def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
     raw_fp = raw.get("attacker_fingerprint") or {}
     details = raw.get("details") or {}
 
-    fingerprint: dict[str, Any] = {}
-    user_agent = raw_fp.get("user_agent", "")
-    if user_agent:
-        fingerprint["user_agent"] = user_agent
-    tool = raw_fp.get("tool", "")
-    if tool:
-        fingerprint["tool"] = tool
-    elif user_agent:
-        ua = user_agent.lower()
-        if "sqlmap" in ua:
-            fingerprint["tool"] = "sqlmap"
-        elif "curl" in ua:
-            fingerprint["tool"] = "curl"
-        elif "python" in ua:
-            fingerprint["tool"] = "python-script"
-        else:
-            fingerprint["tool"] = "browser"
+    fingerprint = _build_deception_fingerprint(raw_fp)
 
     return {
         "event_id": raw.get("event_id", str(uuid.uuid4())),
@@ -327,35 +394,37 @@ def normalize_deception_gw(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_loki_payload(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Group normalized events into Loki streams by source service."""
+    streams: dict[str, list[list[str]]] = {}
+    for event in events:
+        service = event.get("source_service", "unknown")
+        timestamp_ns = str(int(time.time() * 1_000_000_000))
+        log_line = json.dumps({
+            "event_id": event.get("event_id"),
+            "event_type": event.get("event_type"),
+            "source_ip": event.get("source_ip"),
+            "session_id": event.get("session_id"),
+            "mitre_technique": event.get("mitre_technique"),
+            "timestamp": event.get("timestamp"),
+        })
+        streams.setdefault(service, []).append([timestamp_ns, log_line])
+
+    return {
+        "streams": [
+            {"stream": {"service": service}, "values": values}
+            for service, values in streams.items()
+        ]
+    }
+
+
 def push_to_loki(events: list[dict[str, Any]]) -> None:
     """Push a batch of normalized events to Loki for Grafana visualization.
     Failures are swallowed so Loki downtime never breaks the honeypot pipeline."""
     if not events:
         return
     try:
-        # Group events by source_service for Loki stream labels
-        streams: dict[str, list[list[str]]] = {}
-        for event in events:
-            service = event.get("source_service", "unknown")
-            ts_ns = str(int(time.time() * 1_000_000_000))
-            log_line = json.dumps({
-                "event_id": event.get("event_id"),
-                "event_type": event.get("event_type"),
-                "source_ip": event.get("source_ip"),
-                "session_id": event.get("session_id"),
-                "mitre_technique": event.get("mitre_technique"),
-                "timestamp": event.get("timestamp"),
-            })
-            streams.setdefault(service, []).append([ts_ns, log_line])
-
-        payload = {
-            "streams": [
-                {"stream": {"service": service}, "values": values}
-                for service, values in streams.items()
-            ]
-        }
-
-        data = json.dumps(payload).encode("utf-8")
+        data = json.dumps(_build_loki_payload(events)).encode("utf-8")
         req = urllib.request.Request(
             LOKI_URL,
             data=data,
@@ -367,6 +436,38 @@ def push_to_loki(events: list[dict[str, Any]]) -> None:
         print(f"[log-shipper] Loki push failed (non-fatal): {e}")
 
 
+def _update_session(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
+    """Create a session row or increment its event count."""
+    session_id = event["session_id"]
+    session = conn.execute(
+        "SELECT session_id FROM sessions WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+
+    if session:
+        conn.execute(
+            "UPDATE sessions SET event_count = event_count + 1 WHERE session_id = ?",
+            (session_id,),
+        )
+        return
+
+    layers = [event["source_service"]]
+    mitre_list = [event["mitre_technique"]] if event["mitre_technique"] else []
+    conn.execute(
+        SESSION_INSERT_SQL,
+        (
+            session_id,
+            event["source_ip"],
+            event["source_service"],
+            event["timestamp"],
+            None,
+            1,
+            json.dumps(mitre_list),
+            json.dumps(layers),
+        ),
+    )
+
+
 def insert_event(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
     """Insert a normalized event into SQLite.
 
@@ -374,74 +475,16 @@ def insert_event(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
     already-ingested log line is a no-op. Session tracking only runs when a row
     was actually inserted, so re-reads do not inflate session event counts.
     """
-    cur = conn.execute(
-        """
-        INSERT OR IGNORE INTO events (
-            event_id, timestamp, source_service, source_ip, source_port,
-            dest_port, event_type, session_id, cowrie_session, protocol,
-            username, command, attacker_fingerprint, mitre_technique,
-            mitre_tactic, details, raw_data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            event["event_id"],
-            event["timestamp"],
-            event["source_service"],
-            event["source_ip"],
-            event["source_port"],
-            event["dest_port"],
-            event["event_type"],
-            event["session_id"],
-            event["cowrie_session"],
-            event["protocol"],
-            event["username"],
-            event["command"],
-            event["attacker_fingerprint"],
-            event["mitre_technique"],
-            event["mitre_tactic"],
-            event["details"],
-            event["raw_data"],
-        ),
-    )
+    values = tuple(event[field] for field in EVENT_FIELDS)
+    cursor = conn.execute(EVENT_INSERT_SQL, values)
 
     # A duplicate (already-seen event_id) inserts no row; skip session tracking.
-    if cur.rowcount == 0:
+    if cursor.rowcount == 0:
         conn.commit()
         return
 
-    # Update session tracking
     if event["session_id"]:
-        session = conn.execute(
-            "SELECT session_id FROM sessions WHERE session_id = ?",
-            (event["session_id"],),
-        ).fetchone()
-
-        if session:
-            conn.execute(
-                "UPDATE sessions SET event_count = event_count + 1 WHERE session_id = ?",
-                (event["session_id"],),
-            )
-        else:
-            layers = [event["source_service"]]
-            mitre_list = [event["mitre_technique"]] if event["mitre_technique"] else []
-            conn.execute(
-                """
-                INSERT INTO sessions (
-                    session_id, source_ip, source_service, start_time,
-                    end_time, event_count, mitre_techniques, layers_reached
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event["session_id"],
-                    event["source_ip"],
-                    event["source_service"],
-                    event["timestamp"],
-                    None,
-                    1,
-                    json.dumps(mitre_list),
-                    json.dumps(layers),
-                ),
-            )
+        _update_session(conn, event)
 
     conn.commit()
 
@@ -486,6 +529,47 @@ def get_endlessh_logs(since_timestamp: float) -> list[str]:
         return []
 
 
+def _process_json_lines(
+    conn: sqlite3.Connection,
+    lines: list[str],
+    source: str,
+    normalizer: Callable[[dict[str, Any]], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Normalize and store JSONL input while isolating malformed lines."""
+    events: list[dict[str, Any]] = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = normalizer(json.loads(line))
+            insert_event(conn, event)
+            events.append(event)
+        except json.JSONDecodeError:
+            print(f"[log-shipper] JSON parse error in {source}: {line[:100]}")
+        except Exception as error:
+            print(f"[log-shipper] Error processing {source} event: {error}")
+    return events
+
+
+def _process_endlessh_lines(
+    conn: sqlite3.Connection,
+    lines: list[str],
+) -> list[dict[str, Any]]:
+    """Normalize and store Endlessh input while isolating malformed lines."""
+    events: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            event = normalize_endlessh(line)
+            if event is None:
+                continue
+            insert_event(conn, event)
+            events.append(event)
+        except Exception as error:
+            print(f"[log-shipper] Error processing endlessh event: {error}")
+    return events
+
+
 def main() -> None:
     print(f"[log-shipper] Starting. LOG_DIR={LOG_DIR}, DB_PATH={DB_PATH}")
     conn = get_db()
@@ -495,67 +579,35 @@ def main() -> None:
     offsets: dict[str, int] = {}
     cowrie_file = LOG_DIR / "cowrie" / "cowrie.json"
     deception_gw_file = LOG_DIR / "deception-gw" / "deception-gw.json"
+    json_sources = (
+        ("cowrie", cowrie_file, normalize_cowrie),
+        ("deception-gw", deception_gw_file, normalize_deception_gw),
+    )
 
     # Track time for Endlessh docker logs polling
     last_endlessh_poll = time.time()
 
-    print(f"[log-shipper] Watching: cowrie ({cowrie_file}), deception-gw ({deception_gw_file}), endlessh (docker logs)")
+    print(
+        f"[log-shipper] Watching: cowrie ({cowrie_file}), "
+        f"deception-gw ({deception_gw_file}), endlessh (docker logs)"
+    )
     print(f"[log-shipper] Loki push: {LOKI_URL}")
 
     while True:
         batch: list[dict[str, Any]] = []
 
-        # Process Cowrie logs (file tail)
-        offset = offsets.get("cowrie", 0)
-        lines, new_offset = tail_file(cowrie_file, offset)
-        offsets["cowrie"] = new_offset
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-                event = normalize_cowrie(raw)
-                insert_event(conn, event)
-                batch.append(event)
-            except json.JSONDecodeError:
-                print(f"[log-shipper] JSON parse error in cowrie: {line[:100]}")
-            except Exception as e:
-                print(f"[log-shipper] Error processing cowrie event: {e}")
-
-        # Process deception-gw logs (file tail)
-        offset = offsets.get("deception-gw", 0)
-        lines, new_offset = tail_file(deception_gw_file, offset)
-        offsets["deception-gw"] = new_offset
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-                event = normalize_deception_gw(raw)
-                insert_event(conn, event)
-                batch.append(event)
-            except json.JSONDecodeError:
-                print(f"[log-shipper] JSON parse error in deception-gw: {line[:100]}")
-            except Exception as e:
-                print(f"[log-shipper] Error processing deception-gw event: {e}")
+        for source, filepath, normalizer in json_sources:
+            lines, new_offset = tail_file(filepath, offsets.get(source, 0))
+            offsets[source] = new_offset
+            batch.extend(
+                _process_json_lines(conn, lines, source, normalizer)
+            )
 
         # Process Endlessh logs (docker logs poll every 10 seconds)
         now = time.time()
         if now - last_endlessh_poll > 10:
             endlessh_lines = get_endlessh_logs(last_endlessh_poll)
-            for line in endlessh_lines:
-                try:
-                    event = normalize_endlessh(line)
-                    if event is None:
-                        continue
-                    insert_event(conn, event)
-                    batch.append(event)
-                except Exception as e:
-                    print(f"[log-shipper] Error processing endlessh event: {e}")
+            batch.extend(_process_endlessh_lines(conn, endlessh_lines))
             last_endlessh_poll = now
 
         # Push batch to Loki
