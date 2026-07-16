@@ -43,3 +43,6 @@ digests/
 
 # Captured malware binaries from the honeypot (never commit live samples)
 evidence/
+
+# Working files for MoA prompts (not shipped)
+moa-prompt-results.md

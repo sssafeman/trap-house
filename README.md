@@ -422,7 +422,7 @@ This project was built in 5 phases, each producing a deployable artifact:
 4. **Phase 4**: SOC dashboard with Leaflet map, MITRE heatmap, session replay, timeline, Grafana/Loki
 5. **Phase 5**: production deployment, host hardening, portfolio writeup
 
-Each phase was verified before moving to the next. `verify.sh` is a smoke test for the honeypot layer: it starts the stack and checks that Endlessh and Cowrie are listening and logging, and that the container security constraints hold. See [RESULTS.md](RESULTS.md) for findings from the live deployment.
+Each phase was verified before moving to the next. `verify.sh` is a smoke test for the honeypot layer: it starts the stack and checks that Endlessh and Cowrie are listening and logging, and that the container security constraints hold. See [RESULTS.md](RESULTS.md) for findings from the live deployment (178k events, 1,467 attacker IPs, 13 MITRE techniques, full Outlaw/RedTail cryptomining case study).
 
 ## Daily Digest
 
