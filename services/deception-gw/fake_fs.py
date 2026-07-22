@@ -5,19 +5,22 @@ whitelist and returns canned fake output. There is no subprocess, eval, exec,
 os.system, __import__, or compile anywhere in this module.
 """
 import copy
-from typing import Optional
 
 import config
 
 HOSTNAME: str = "corp-webapp-01"
+UPLOAD_DIRECTORY: str = "/var/www/uploads"
+DEFAULT_CWD: str = "/var/www/html"
 KERNEL: str = (
     "Linux corp-webapp-01 5.15.0-91-generic #101-Ubuntu SMP "
     "Tue Nov 14 13:30:08 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux"
 )
 
+FakeEntry = str | list[str]
+
 # A dict-based fake filesystem. Keys are absolute paths. Directory values are
 # lists of child names. File values are strings of fake content.
-INITIAL_FS: dict[str, object] = {
+INITIAL_FS: dict[str, FakeEntry] = {
     "/": ["var", "etc", "home", "root", "tmp"],
     "/var": ["www"],
     "/var/www": ["html", "uploads"],
@@ -27,7 +30,7 @@ INITIAL_FS: dict[str, object] = {
         "<?php\n$db_host='10.0.0.12';\n$db_user='backup_admin';\n"
         "$db_pass='B@ckup!P@ss';\n?>\n"
     ),
-    "/var/www/uploads": [],
+    UPLOAD_DIRECTORY: [],
     "/etc": ["passwd", "hostname"],
     "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\n",
     "/etc/hostname": HOSTNAME + "\n",
@@ -52,18 +55,30 @@ WHITELIST: set[str] = {
 def _normalize(cwd: str, target: str) -> str:
     """Resolve a target path against the current directory, no real FS calls."""
     if target.startswith("/"):
-        path = target
-    elif target in ("", "."):
-        path = cwd
-    elif target == "..":
-        path = "/" + "/".join([p for p in cwd.strip("/").split("/")[:-1] if p])
-        path = path if path != "/" else "/"
-    else:
-        base = cwd.rstrip("/")
-        path = f"{base}/{target}" if base else f"/{target}"
+        return _strip_trailing_slash(target)
+    if target in ("", "."):
+        return _strip_trailing_slash(cwd)
+    if target == "..":
+        parent_parts = [
+            part for part in cwd.strip("/").split("/")[:-1] if part
+        ]
+        return "/" + "/".join(parent_parts)
+
+    base = cwd.rstrip("/")
+    path = f"{base}/{target}" if base else f"/{target}"
+    return _strip_trailing_slash(path)
+
+
+def _strip_trailing_slash(path: str) -> str:
+    """Remove trailing separators while preserving the root path."""
     if path != "/":
         path = path.rstrip("/")
     return path or "/"
+
+
+def _safe_upload_name(filename: str) -> str:
+    """Sanitize an upload name without interpreting it as a real path."""
+    return filename.replace("/", "_").replace("..", "_")
 
 
 class WebshellSandbox:
@@ -71,9 +86,21 @@ class WebshellSandbox:
     uploads by one attacker do not leak into another session."""
 
     def __init__(self) -> None:
-        self.fs: dict[str, object] = copy.deepcopy(INITIAL_FS)
-        self.cwd: str = "/var/www/html"
+        self.fs: dict[str, FakeEntry] = copy.deepcopy(INITIAL_FS)
+        self.cwd: str = DEFAULT_CWD
         self._stored_bytes: int = 0
+
+    def _has_upload_capacity(
+        self,
+        listing: FakeEntry | None,
+        content_length: int,
+    ) -> bool:
+        """Check the byte and file ceilings for a new upload."""
+        if self._stored_bytes + content_length > config.MAX_SANDBOX_BYTES:
+            return False
+        if isinstance(listing, list) and len(listing) >= config.MAX_SANDBOX_FILES:
+            return False
+        return True
 
     def upload(self, filename: str, content: str) -> str:
         """Store an uploaded file in the fake uploads directory. Returns the
@@ -82,13 +109,11 @@ class WebshellSandbox:
         Enforces per-sandbox file-count and total-byte ceilings so a single
         attacker cannot grow one sandbox without bound.
         """
-        safe_name = filename.replace("/", "_").replace("..", "_")
-        path = f"/var/www/uploads/{safe_name}"
-        listing = self.fs.get("/var/www/uploads")
+        safe_name = _safe_upload_name(filename)
+        path = f"{UPLOAD_DIRECTORY}/{safe_name}"
+        listing = self.fs.get(UPLOAD_DIRECTORY)
         is_new = not (isinstance(listing, list) and safe_name in listing)
-        if is_new and self._stored_bytes + len(content) > config.MAX_SANDBOX_BYTES:
-            return path
-        if is_new and isinstance(listing, list) and len(listing) >= config.MAX_SANDBOX_FILES:
+        if is_new and not self._has_upload_capacity(listing, len(content)):
             return path
         self._stored_bytes += len(content)
         self.fs[path] = content
@@ -114,7 +139,7 @@ class WebshellSandbox:
         if entry is None:
             return f"ls: cannot access '{target}': No such file or directory"
         if isinstance(entry, list):
-            return "  ".join(entry) if entry else ""
+            return "  ".join(entry)
         # ls on a file just echoes the name.
         return target.rstrip("/").split("/")[-1]
 

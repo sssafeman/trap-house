@@ -15,7 +15,6 @@ import os
 import re
 import sqlite3
 import time
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -23,6 +22,55 @@ import yaml
 DB_PATH = os.environ.get("DB_PATH", "/data/db/trap-house.db")
 TECHNIQUES_FILE = os.environ.get("TECHNIQUES_FILE", "/config/mitre-techniques.yaml")
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "5"))
+MAPPING_BATCH_SIZE = 500
+ACTIVE_PROFILE_INTERVAL = 6
+IDLE_PROFILE_INTERVAL = 12
+
+TECHNIQUE_INSERT_SQL = """
+INSERT OR IGNORE INTO techniques
+(technique_id, event_id, name, subtechnique, tactic, description, match_type)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+"""
+
+ATTACKER_AGGREGATES_SQL = """
+SELECT source_ip,
+       MIN(timestamp) as first_seen,
+       MAX(timestamp) as last_seen,
+       COUNT(*) as event_count,
+       COUNT(DISTINCT session_id) as session_count,
+       GROUP_CONCAT(DISTINCT username) as usernames,
+       GROUP_CONCAT(DISTINCT protocol) as protocols
+FROM events
+WHERE source_ip IS NOT NULL AND source_ip != ''
+GROUP BY source_ip
+"""
+
+ATTACKER_UPSERT_SQL = """
+INSERT INTO attackers
+(source_ip, first_seen, last_seen, event_count, session_count,
+ tools_detected, mitre_techniques, top_username, protocols, risk_score)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(source_ip) DO UPDATE SET
+    first_seen = excluded.first_seen,
+    last_seen = excluded.last_seen,
+    event_count = excluded.event_count,
+    session_count = excluded.session_count,
+    tools_detected = excluded.tools_detected,
+    mitre_techniques = excluded.mitre_techniques,
+    top_username = excluded.top_username,
+    protocols = excluded.protocols,
+    risk_score = excluded.risk_score
+"""
+
+UNMAPPED_EVENTS_SQL = f"""
+SELECT e.event_id, e.event_type, e.raw_data, e.details, e.command,
+       e.attacker_fingerprint
+FROM events e
+LEFT JOIN mapping_state ms ON e.event_id = ms.event_id
+WHERE ms.event_id IS NULL
+ORDER BY e.timestamp ASC
+LIMIT {MAPPING_BATCH_SIZE}
+"""
 
 
 def load_techniques(filepath: str) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
@@ -101,6 +149,38 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _build_match(
+    event_id: str,
+    technique_id: str,
+    technique: dict[str, Any],
+    match_type: str,
+) -> dict[str, Any]:
+    """Build the common stored shape for a MITRE technique match."""
+    return {
+        "technique_id": technique_id,
+        "event_id": event_id,
+        "name": technique["name"],
+        "subtechnique": technique.get("subtechnique", ""),
+        "tactic": technique["tactic"],
+        "description": technique.get("description", ""),
+        "match_type": match_type,
+    }
+
+
+def _pattern_search_text(
+    pattern: dict[str, Any],
+    raw_data: str,
+    details: str,
+    combined: str,
+) -> str:
+    """Select the configured event text for a regex pattern."""
+    if pattern["field"] == "raw_data":
+        return raw_data
+    if pattern["field"] == "details":
+        return details
+    return combined
+
+
 def map_event(
     event: dict[str, Any],
     static_map: dict[str, dict[str, Any]],
@@ -111,49 +191,39 @@ def map_event(
     event_type = event.get("event_type", "")
     event_id = event.get("event_id", "")
 
-    # Static event-type mapping
+    seen_ids: set[str] = set()
     if event_type in static_map:
-        tech = static_map[event_type]
-        matches.append({
-            "technique_id": tech["id"],
-            "event_id": event_id,
-            "name": tech["name"],
-            "subtechnique": tech.get("subtechnique", ""),
-            "tactic": tech["tactic"],
-            "description": tech.get("description", ""),
-            "match_type": "event_type",
-        })
+        technique = static_map[event_type]
+        technique_id = technique["id"]
+        matches.append(
+            _build_match(event_id, technique_id, technique, "event_type")
+        )
+        seen_ids.add(technique_id)
 
     # Regex pattern matching against raw_data and details
     raw_data_str = event.get("raw_data", "") or ""
     details_str = event.get("details", "") or ""
     command = event.get("command", "") or ""
 
-    # Build a combined text to search
     search_text = " ".join([raw_data_str, details_str, command])
 
-    for pat in patterns:
-        field_value = ""
-        if pat["field"] == "raw_data":
-            field_value = raw_data_str
-        elif pat["field"] == "details":
-            field_value = details_str
-        else:
-            field_value = search_text
+    for pattern in patterns:
+        field_value = _pattern_search_text(
+            pattern,
+            raw_data_str,
+            details_str,
+            search_text,
+        )
+        if not pattern["regex"].search(field_value):
+            continue
 
-        if pat["regex"].search(field_value):
-            # Avoid duplicate technique matches for the same event
-            existing_ids = {m["technique_id"] for m in matches}
-            if pat["technique"] not in existing_ids:
-                matches.append({
-                    "technique_id": pat["technique"],
-                    "event_id": event_id,
-                    "name": pat["name"],
-                    "subtechnique": pat.get("subtechnique", ""),
-                    "tactic": pat["tactic"],
-                    "description": pat.get("description", ""),
-                    "match_type": "pattern",
-                })
+        technique_id = pattern["technique"]
+        if technique_id in seen_ids:
+            continue
+        matches.append(
+            _build_match(event_id, technique_id, pattern, "pattern")
+        )
+        seen_ids.add(technique_id)
 
     return matches
 
@@ -162,11 +232,7 @@ def write_techniques(conn: sqlite3.Connection, matches: list[dict[str, Any]]) ->
     """Write technique matches to the techniques table."""
     for m in matches:
         conn.execute(
-            """
-            INSERT OR IGNORE INTO techniques
-            (technique_id, event_id, name, subtechnique, tactic, description, match_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+            TECHNIQUE_INSERT_SQL,
             (
                 m["technique_id"], m["event_id"], m["name"],
                 m["subtechnique"], m["tactic"], m["description"],
@@ -176,94 +242,117 @@ def write_techniques(conn: sqlite3.Connection, matches: list[dict[str, Any]]) ->
     conn.commit()
 
 
-def update_attackers(conn: sqlite3.Connection) -> None:
-    """Aggregate attacker profiles from events."""
-    # Get or update attacker records
+def _attacker_tools(conn: sqlite3.Connection, source_ip: str) -> set[str]:
+    """Extract known tool labels from an attacker's event fingerprints."""
+    rows = conn.execute(
+        "SELECT attacker_fingerprint FROM events "
+        "WHERE source_ip = ? AND attacker_fingerprint IS NOT NULL",
+        (source_ip,),
+    ).fetchall()
+    tools: set[str] = set()
+    for row in rows:
+        try:
+            fingerprint = json.loads(row[0])
+            tool = fingerprint.get("tool", "")
+            if tool and tool != "unknown":
+                tools.add(tool)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return tools
+
+
+def _attacker_techniques(
+    conn: sqlite3.Connection,
+    source_ip: str,
+) -> list[str]:
+    """Return distinct mapped technique IDs for an attacker."""
     rows = conn.execute(
         """
-        SELECT source_ip,
-               MIN(timestamp) as first_seen,
-               MAX(timestamp) as last_seen,
-               COUNT(*) as event_count,
-               COUNT(DISTINCT session_id) as session_count,
-               GROUP_CONCAT(DISTINCT username) as usernames,
-               GROUP_CONCAT(DISTINCT protocol) as protocols
-        FROM events
-        WHERE source_ip IS NOT NULL AND source_ip != ''
-        GROUP BY source_ip
-        """
+        SELECT DISTINCT t.technique_id
+        FROM techniques t
+        JOIN events e ON t.event_id = e.event_id
+        WHERE e.source_ip = ?
+        """,
+        (source_ip,),
     ).fetchall()
+    return [row[0] for row in rows]
+
+
+def _risk_score(
+    technique_ids: list[str],
+    session_count: int | None,
+    tools: set[str],
+    event_count: int | None,
+) -> float:
+    """Calculate the existing weighted attacker risk score."""
+    risk = 0.0
+    risk += len(technique_ids) * 2.0
+    risk += min(session_count or 0, 10) * 1.0
+    risk += len(tools) * 3.0
+    risk += min(event_count or 0, 50) * 0.1
+    return min(risk, 100.0)
+
+
+def _top_username(usernames: str | None) -> str:
+    """Select the top username using the existing aggregation semantics."""
+    if not usernames:
+        return ""
+    username_list = [username for username in usernames.split(",") if username]
+    if not username_list:
+        return ""
+    return max(set(username_list), key=username_list.count)
+
+
+def _attacker_values(
+    conn: sqlite3.Connection,
+    row: tuple[Any, ...],
+) -> tuple[Any, ...]:
+    """Build the values persisted for one attacker aggregate row."""
+    (
+        source_ip,
+        first_seen,
+        last_seen,
+        event_count,
+        session_count,
+        usernames,
+        protocols,
+    ) = row
+    tools = _attacker_tools(conn, source_ip)
+    technique_ids = _attacker_techniques(conn, source_ip)
+
+    return (
+        source_ip,
+        first_seen,
+        last_seen,
+        event_count or 0,
+        session_count or 0,
+        json.dumps(sorted(tools)),
+        json.dumps(technique_ids),
+        _top_username(usernames),
+        protocols or "",
+        _risk_score(technique_ids, session_count, tools, event_count),
+    )
+
+
+def update_attackers(conn: sqlite3.Connection) -> None:
+    """Aggregate attacker profiles from events."""
+    rows = conn.execute(ATTACKER_AGGREGATES_SQL).fetchall()
 
     for row in rows:
-        ip, first_seen, last_seen, event_count, session_count, usernames, protocols = row
-
-        # Detect tools from fingerprints
-        tools: set[str] = set()
-        fp_rows = conn.execute(
-            "SELECT attacker_fingerprint FROM events WHERE source_ip = ? AND attacker_fingerprint IS NOT NULL",
-            (ip,),
-        ).fetchall()
-        for fp_row in fp_rows:
-            try:
-                fp = json.loads(fp_row[0])
-                tool = fp.get("tool", "")
-                if tool and tool != "unknown":
-                    tools.add(tool)
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # Get MITRE techniques for this attacker
-        tech_rows = conn.execute(
-            """
-            SELECT DISTINCT t.technique_id
-            FROM techniques t
-            JOIN events e ON t.event_id = e.event_id
-            WHERE e.source_ip = ?
-            """,
-            (ip,),
-        ).fetchall()
-        techniques_list = [r[0] for r in tech_rows]
-
-        # Risk score: weighted by technique diversity, session count, and tool detection
-        risk = 0.0
-        risk += len(techniques_list) * 2.0
-        risk += min(session_count or 0, 10) * 1.0
-        risk += len(tools) * 3.0
-        risk += min(event_count or 0, 50) * 0.1
-        risk = min(risk, 100.0)
-
-        # Top username (most frequently used)
-        top_username = ""
-        if usernames:
-            uname_list = [u for u in (usernames or "").split(",") if u]
-            if uname_list:
-                top_username = max(set(uname_list), key=uname_list.count)
-
-        conn.execute(
-            """
-            INSERT INTO attackers
-            (source_ip, first_seen, last_seen, event_count, session_count,
-             tools_detected, mitre_techniques, top_username, protocols, risk_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(source_ip) DO UPDATE SET
-                first_seen = excluded.first_seen,
-                last_seen = excluded.last_seen,
-                event_count = excluded.event_count,
-                session_count = excluded.session_count,
-                tools_detected = excluded.tools_detected,
-                mitre_techniques = excluded.mitre_techniques,
-                top_username = excluded.top_username,
-                protocols = excluded.protocols,
-                risk_score = excluded.risk_score
-            """,
-            (
-                ip, first_seen, last_seen, event_count or 0, session_count or 0,
-                json.dumps(sorted(tools)), json.dumps(techniques_list),
-                top_username, protocols or "",
-                risk,
-            ),
-        )
+        conn.execute(ATTACKER_UPSERT_SQL, _attacker_values(conn, row))
     conn.commit()
+
+
+def _unmapped_event(row: tuple[Any, ...]) -> dict[str, Any]:
+    """Convert a positional unmapped-event row to the mapping shape."""
+    return {
+        "event_id": row[0],
+        "event_type": row[1],
+        "raw_data": row[2] or "",
+        "details": row[3] or "",
+        "command": row[4] or "",
+        "attacker_fingerprint": row[5],
+    }
 
 
 def get_unmapped_events(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -273,29 +362,8 @@ def get_unmapped_events(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     so events that legitimately match no technique are still retired after one
     pass instead of being re-fetched on every cycle.
     """
-    rows = conn.execute(
-        """
-        SELECT e.event_id, e.event_type, e.raw_data, e.details, e.command,
-               e.attacker_fingerprint
-        FROM events e
-        LEFT JOIN mapping_state ms ON e.event_id = ms.event_id
-        WHERE ms.event_id IS NULL
-        ORDER BY e.timestamp ASC
-        LIMIT 500
-        """
-    ).fetchall()
-
-    events: list[dict[str, Any]] = []
-    for row in rows:
-        events.append({
-            "event_id": row[0],
-            "event_type": row[1],
-            "raw_data": row[2] or "",
-            "details": row[3] or "",
-            "command": row[4] or "",
-            "attacker_fingerprint": row[5],
-        })
-    return events
+    rows = conn.execute(UNMAPPED_EVENTS_SQL).fetchall()
+    return [_unmapped_event(row) for row in rows]
 
 
 def mark_mapped(conn: sqlite3.Connection, event_ids: list[str]) -> None:
@@ -307,10 +375,54 @@ def mark_mapped(conn: sqlite3.Connection, event_ids: list[str]) -> None:
     conn.commit()
 
 
+def _map_events(
+    events: list[dict[str, Any]],
+    static_map: dict[str, dict[str, Any]],
+    patterns: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collect all technique matches for an event batch in event order."""
+    matches: list[dict[str, Any]] = []
+    for event in events:
+        matches.extend(map_event(event, static_map, patterns))
+    return matches
+
+
+def _store_mappings(
+    conn: sqlite3.Connection,
+    events: list[dict[str, Any]],
+    static_map: dict[str, dict[str, Any]],
+    patterns: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Map a batch, persist matches, then retire every processed event."""
+    matches = _map_events(events, static_map, patterns)
+    write_techniques(conn, matches)
+    mark_mapped(conn, [event["event_id"] for event in events])
+    return matches
+
+
+def _update_profiles_if_due(
+    conn: sqlite3.Connection,
+    cycle: int,
+    mapped_events: bool,
+) -> None:
+    """Refresh attacker profiles on the active or idle cycle cadence."""
+    interval = (
+        ACTIVE_PROFILE_INTERVAL if mapped_events else IDLE_PROFILE_INTERVAL
+    )
+    if cycle % interval != 0:
+        return
+    update_attackers(conn)
+    if mapped_events:
+        print("[mitre-mapper] Updated attacker profiles")
+
+
 def main() -> None:
     print(f"[mitre-mapper] Starting. DB={DB_PATH}, techniques={TECHNIQUES_FILE}")
     static_map, patterns = load_techniques(TECHNIQUES_FILE)
-    print(f"[mitre-mapper] Loaded {len(static_map)} static mappings, {len(patterns)} regex patterns")
+    print(
+        f"[mitre-mapper] Loaded {len(static_map)} static mappings, "
+        f"{len(patterns)} regex patterns"
+    )
 
     # busy_timeout lets the mapper wait out short lock windows from the
     # shipper, which writes the same database concurrently, instead of
@@ -318,7 +430,10 @@ def main() -> None:
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("PRAGMA busy_timeout=30000")
     init_db(conn)
-    print("[mitre-mapper] Database initialized (techniques, attackers, mapping_state tables)")
+    print(
+        "[mitre-mapper] Database initialized "
+        "(techniques, attackers, mapping_state tables)"
+    )
 
     cycle = 0
     while True:
@@ -326,27 +441,22 @@ def main() -> None:
             unmapped = get_unmapped_events(conn)
 
             if unmapped:
-                all_matches: list[dict[str, Any]] = []
-                for event in unmapped:
-                    matches = map_event(event, static_map, patterns)
-                    all_matches.extend(matches)
-                write_techniques(conn, all_matches)
-                # Retire every processed event, including zero-match ones.
-                mark_mapped(conn, [e["event_id"] for e in unmapped])
-                print(f"[mitre-mapper] Cycle {cycle}: mapped {len(unmapped)} events, found {len(all_matches)} technique matches")
+                matches = _store_mappings(
+                    conn,
+                    unmapped,
+                    static_map,
+                    patterns,
+                )
+                print(
+                    f"[mitre-mapper] Cycle {cycle}: mapped {len(unmapped)} "
+                    f"events, found {len(matches)} technique matches"
+                )
 
-                # Update attacker profiles every 30 seconds (6 cycles * 5s)
-                if cycle % 6 == 0:
-                    update_attackers(conn)
-                    print("[mitre-mapper] Updated attacker profiles")
-            else:
-                # Still update attacker profiles periodically
-                if cycle % 12 == 0:
-                    update_attackers(conn)
-        except Exception as e:
+            _update_profiles_if_due(conn, cycle, bool(unmapped))
+        except Exception as error:
             # Never let a transient DB error or a single malformed event kill
             # the poller. Log and continue to the next cycle.
-            print(f"[mitre-mapper] Cycle {cycle} error (non-fatal): {e}")
+            print(f"[mitre-mapper] Cycle {cycle} error (non-fatal): {error}")
 
         cycle += 1
         time.sleep(POLL_INTERVAL)
