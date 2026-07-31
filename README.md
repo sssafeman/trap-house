@@ -4,33 +4,35 @@
 
 ![Animated kill chain of the Outlaw/RedTail cryptomining intrusion captured by Trap House, rendered as a dark SOC-style motion graphic showing brute force, discovery, tool transfer, persistence, and execution](docs/img/outlaw-killchain.gif)
 
-*The Outlaw/RedTail cryptomining kill chain, reconstructed from 162 real captured events and rendered with Manim CE. Full analysis in [RESULTS.md](RESULTS.md).*
+*The Outlaw or RedTail intrusion chain, reconstructed from the final live collection. Full analysis in [RESULTS.md](RESULTS.md) and [docs/final-report.md](docs/final-report.md).*
 
 [![CI](https://github.com/sssafeman/trap-house/actions/workflows/ci.yml/badge.svg)](https://github.com/sssafeman/trap-house/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![MITRE ATT&CK: 11 techniques observed](https://img.shields.io/badge/MITRE%20ATT%26CK-11%20techniques%20observed-red)
+![MITRE ATT&CK: 12 techniques observed](https://img.shields.io/badge/MITRE%20ATT%26CK-12%20techniques%20observed-red)
 
 Trap House simulates a fake company network that draws attackers into an infinite loop of decoy credentials and services. All attacker behavior is logged, mapped to MITRE ATT&CK techniques, and visualized on a custom threat intelligence dashboard. Detection and intelligence only: no hack-back, no offensive capability. Built for the Norwegian legal context ([LEGAL.md](LEGAL.md)).
 
-## Live Results: 9 Days on the Open Internet
+## Final Results: 31 Days on the Open Internet
 
-Captured in 9 days of live internet-facing deployment (2026-06-30 to 2026-07-08) on a public VPS:
+The live collection ran from 2026-06-30 to 2026-07-31 on a public VPS. The VPS is now powered off and the evidence is archived:
 
-| Metric | Value |
-|-|-|
-| Total events captured | 31,788 |
-| Unique attacker IP addresses | 416 |
-| Distinct sessions | 6,886 |
-| MITRE ATT&CK techniques observed | 11 |
-| Events in the last 24 hours | 3,534 |
-| Successful brute-force logins | 144 of 5,678 attempts (roughly 2.5%) |
+- 298,928 events
+- 2,421 unique attacker IP addresses
+- 66,299 sessions
+- 12 MITRE ATT&CK technique IDs observed
+- 54,143 authentication attempts
+- 435 accepted decoy logins
+- 437 file uploads
+- 226 command execution events
+
+The complete report is in [docs/final-report.md](docs/final-report.md).
 
 ![Dashboard stats bar showing live totals for events, unique attackers, sessions, and MITRE techniques](docs/img/stats-bar.png)
 
-> **Case study: Outlaw/RedTail cryptomining campaign.** A single IP, 130.12.180.51 (Saudi Arabia), executed a complete kill chain against the honeypot: 162 events across 18 sessions, 8 MITRE ATT&CK techniques. It brute-forced root, fingerprinted the architecture with `uname`, uploaded 6 malware binaries over SFTP, injected an SSH key locked with `chattr +ai`, and ran a dropper. The delivered `redtail.x86_64` binary scores 37/64 on VirusTotal and matches ThreatFox IOC 1820703 at 85% confidence. The honeypot logged everything and executed nothing. Full breakdown with file hashes and script analysis in [RESULTS.md](RESULTS.md).
+> **Case study: repeated Outlaw or RedTail activity.** Source 130.12.180.51 produced 992 events across 75 sessions, 75 accepted decoy logins, 423 uploads, and 65 persistence and dropper command sequences. It prepared SSH key persistence with `chattr +ai`, detected the architecture, uploaded architecture-specific binaries, and attempted deployment. A second source replayed the same tooling pattern. The honeypot logged everything and executed nothing. Full breakdown in [RESULTS.md](RESULTS.md).
 
 ![Session replay panel reconstructing the Outlaw attacker's step-by-step path: SSH brute force, login, discovery commands, SFTP uploads, and dropper execution](docs/img/session-replay-outlaw.png)
 
@@ -206,6 +208,8 @@ trap-house/
     egress-firewall.sh        # Restrict honeypot outbound traffic (anti-pivot)
     prune-data.sh             # Enforce DB and log retention windows (cron)
   docs/
+    final-report.md           # Final frozen collection report
+    final-evidence-manifest.md # Evidence hashes and closure state
     PHASE2_DESIGN.md          # Deception middleware design spec
     PHASE4_DESIGN.md          # Dashboard design spec
     img/                      # Dashboard screenshots and kill chain animation
@@ -254,9 +258,9 @@ open http://localhost:8001
 open http://localhost:3000
 ```
 
-## Production Deployment (DigitalOcean, GitHub Student Pack)
+## Historical Production Deployment Reference
 
-Recommended path for students. $200 credit covers 6+ months of a $32/mo droplet. You only need 2 to 3 weeks of data collection.
+The live collection used a Hetzner VPS. The host is now powered off. The commands below remain as a reference for a deliberate future redeployment.
 
 ```bash
 # 1. Create droplet: Frankfurt, Ubuntu 24.04, $32/mo Premium Intel (2 vCPU, 4GB RAM)
@@ -422,7 +426,7 @@ This project was built in 5 phases, each producing a deployable artifact:
 4. **Phase 4**: SOC dashboard with Leaflet map, MITRE heatmap, session replay, timeline, Grafana/Loki
 5. **Phase 5**: production deployment, host hardening, portfolio writeup
 
-Each phase was verified before moving to the next. `verify.sh` is a smoke test for the honeypot layer: it starts the stack and checks that Endlessh and Cowrie are listening and logging, and that the container security constraints hold. See [RESULTS.md](RESULTS.md) for findings from the live deployment (178k events, 1,467 attacker IPs, 13 MITRE techniques, full Outlaw/RedTail cryptomining case study).
+Each phase was verified before moving to the next. `verify.sh` is a smoke test for the honeypot layer: it starts the stack and checks that Endlessh and Cowrie are listening and logging, and that the container security constraints hold. See [RESULTS.md](RESULTS.md) for the final findings from the live deployment, including 298,928 events, 2,421 attacker IPs, 12 observed technique IDs, and the full Outlaw or RedTail case study.
 
 ## Daily Digest
 
