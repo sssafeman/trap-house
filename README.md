@@ -2,7 +2,9 @@
 
 **A multi-layer deception honeypot that lures attackers into an endless maze of decoy services, then maps every move to MITRE ATT&CK.**
 
-![Animated kill chain of the Outlaw/RedTail cryptomining intrusion captured by Trap House, rendered as a dark SOC-style motion graphic showing brute force, discovery, tool transfer, persistence, and execution](docs/img/outlaw-killchain.gif)
+<a href="docs/img/outlaw-killchain.mp4"><img src="docs/img/outlaw-killchain.gif" alt="Animated kill chain of the Outlaw or RedTail cryptomining intrusion captured by Trap House, rendered as a dark SOC style motion graphic showing brute force, discovery, tool transfer, persistence, and execution"></a>
+
+[Open the full 60 FPS MP4](docs/img/outlaw-killchain.mp4)
 
 *The Outlaw or RedTail intrusion chain, reconstructed from the final live collection. Full analysis in [RESULTS.md](RESULTS.md) and [docs/final-report.md](docs/final-report.md).*
 

@@ -32,6 +32,7 @@ with sync_playwright() as p:
 
     # Screenshot 2: Full page scroll
     print("Capturing dashboard-fullpage.png...")
+    page.add_style_tag(content=".topnav { position: static !important; }")
     page.screenshot(path=f"{OUT}/dashboard-fullpage.png", full_page=True)
     print("done")
 

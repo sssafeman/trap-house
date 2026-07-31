@@ -59,6 +59,7 @@ with sync_playwright() as p:
 
     # Capture the full page with the Outlaw replay
     print("Capturing dashboard-full-with-outlaw-replay.png...")
+    page.add_style_tag(content=".topnav { position: static !important; }")
     page.screenshot(path=f"{OUT}/dashboard-full-with-outlaw-replay.png", full_page=True)
     print("done")
 

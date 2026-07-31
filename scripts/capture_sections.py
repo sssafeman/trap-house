@@ -48,6 +48,7 @@ with sync_playwright() as p:
 
     # 5. Full dashboard (all sections)
     print("5. Capturing dashboard-full.png...")
+    page.add_style_tag(content=".topnav { position: static !important; }")
     page.screenshot(path=f"{OUT}/dashboard-full.png", full_page=True)
     print("   done")
 
