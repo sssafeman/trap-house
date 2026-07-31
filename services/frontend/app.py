@@ -149,8 +149,7 @@ async def api_stats() -> JSONResponse:
             (SELECT COUNT(*) FROM events) AS events,
             (SELECT COUNT(DISTINCT source_ip) FROM events
                 WHERE source_ip IS NOT NULL AND source_ip != '') AS attackers,
-            (SELECT COUNT(DISTINCT session_id) FROM events
-                WHERE session_id IS NOT NULL AND session_id != '') AS sessions,
+            (SELECT COUNT(*) FROM sessions) AS sessions,
             (SELECT COUNT(DISTINCT technique_id) FROM techniques) AS techniques,
             (SELECT COUNT(*) FROM events
                 WHERE timestamp >= datetime('now', '-24 hours')) AS events_24h,

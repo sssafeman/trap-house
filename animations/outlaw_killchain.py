@@ -100,7 +100,7 @@ class OutlawKillChain(MovingCameraScene):
         steps = [
             ("T1110.001", "Brute Force", "Hammered root passwords", ACCENT),
             ("T1082", "System Info Discovery", "uname -s -m (arch fingerprint)", PRIMARY),
-            ("T1105", "Ingress Tool Transfer", "SFTP upload: 6 files, 8 times", SECONDARY),
+            ("T1105", "Ingress Tool Transfer", "SFTP upload: 7 filenames, 423 total uploads", SECONDARY),
             ("Persistence", "SSH Key + chattr +ai", "rsa-key-20230629 (Outlaw sig)", DANGER),
             ("T1059", "Execution", "clean.sh + setup.sh + redtail binary", ACCENT),
         ]
@@ -199,11 +199,11 @@ class OutlawKillChain(MovingCameraScene):
         self.play(Write(stats_title), run_time=0.9, rate_func=smooth)
 
         stats = [
-            ("162 events", "from a single IP"),
-            ("18 sessions", "over 8 days"),
-            ("6 files uploaded", "sha256 verified"),
-            ("37/64 VirusTotal", "redtail.x86_64"),
-            ("ThreatFox IOC 1820703", "elf.redtail, confidence 85%"),
+            ("992 events", "from a single source"),
+            ("75 sessions", "over 31 days"),
+            ("423 uploads", "across 7 filenames"),
+            ("37 SHA256 values", "across captured variants"),
+            ("65 dropper sequences", "with SSH key persistence"),
         ]
 
         stats_group = VGroup()
@@ -219,14 +219,13 @@ class OutlawKillChain(MovingCameraScene):
         stats_group.next_to(stats_title, DOWN, buff=0.8)
 
         # Counted values: hide the final digit glyphs, overlay live counters
-        # right-aligned where those glyphs sit. The "/64", IOC ID, and all
-        # labels stay static.
+        # right-aligned where those glyphs sit. The labels stay static.
         counter_specs = [
-            (stats_group[0][0], stats[0][0], "162", 162, 24, ACCENT, BOLD, OP_PRIMARY),
-            (stats_group[1][0], stats[1][0], "18", 18, 24, ACCENT, BOLD, OP_PRIMARY),
-            (stats_group[2][0], stats[2][0], "6", 6, 24, ACCENT, BOLD, OP_PRIMARY),
+            (stats_group[0][0], stats[0][0], "992", 992, 24, ACCENT, BOLD, OP_PRIMARY),
+            (stats_group[1][0], stats[1][0], "75", 75, 24, ACCENT, BOLD, OP_PRIMARY),
+            (stats_group[2][0], stats[2][0], "423", 423, 24, ACCENT, BOLD, OP_PRIMARY),
             (stats_group[3][0], stats[3][0], "37", 37, 24, ACCENT, BOLD, OP_PRIMARY),
-            (stats_group[4][1], stats[4][1], "85", 85, 18, WHITE, NORMAL, OP_CONTEXT),
+            (stats_group[4][0], stats[4][0], "65", 65, 24, ACCENT, BOLD, OP_PRIMARY),
         ]
 
         trackers = []
