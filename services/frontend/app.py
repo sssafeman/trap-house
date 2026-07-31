@@ -38,9 +38,11 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 def get_conn() -> sqlite3.Connection:
     """Open a read-only connection to the intel store.
 
-    The database may be in WAL mode on a read-only mounted volume, so first try
-    a plain read-only open and fall back to an immutable open if the connection
-    cannot be established (for example when the -shm file cannot be mapped).
+    The archive path uses immutable mode because the frozen database is mounted
+    without active WAL or shared-memory sidecars. Immutable mode intentionally
+    ignores any later journal updates, so it must not be used for a live store.
+    The live path uses a normal read-only connection and falls back to immutable
+    mode only when the read-only connection cannot be established.
     """
     if ARCHIVE_MODE:
         conn = sqlite3.connect(f"file:{DB_PATH}?immutable=1", uri=True, timeout=5)
