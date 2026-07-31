@@ -42,10 +42,13 @@ def get_conn() -> sqlite3.Connection:
     a plain read-only open and fall back to an immutable open if the connection
     cannot be established (for example when the -shm file cannot be mapped).
     """
-    try:
-        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
-    except sqlite3.OperationalError:
+    if ARCHIVE_MODE:
         conn = sqlite3.connect(f"file:{DB_PATH}?immutable=1", uri=True, timeout=5)
+    else:
+        try:
+            conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+        except sqlite3.OperationalError:
+            conn = sqlite3.connect(f"file:{DB_PATH}?immutable=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     return conn
 
