@@ -136,6 +136,7 @@ body {
   animation: pulse 2s infinite;
 }
 .status-dot.stale { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.status-dot.archived { background: #00f0ff; box-shadow: 0 0 8px #00f0ff; animation: none; }
 .nav-status:has(.status-dot.stale) #live-label { color: var(--danger); }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 

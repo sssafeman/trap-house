@@ -201,6 +201,47 @@ def _copy_present_fields(
     }
 
 
+SENSITIVE_RAW_KEYS = {
+    "password",
+    "passwd",
+    "passphrase",
+    "secret",
+    "secret_key",
+    "secret_access_key",
+    "access_key",
+    "access_key_id",
+    "api_key",
+    "token",
+}
+
+
+def _redact_sensitive(value: Any, key: str | None = None) -> Any:
+    """Redact credential material before retaining a raw event payload."""
+    if key and key.lower() in SENSITIVE_RAW_KEYS:
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            item_key: _redact_sensitive(item_value, item_key)
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive(item) for item in value]
+    return value
+
+
+def _timestamp_order(value: str | None) -> float:
+    """Return a comparable UTC timestamp for ISO-8601 values."""
+    if not value:
+        return float("inf")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except ValueError:
+        return float("inf")
+
+
 def _detect_cowrie_tool(ssh_version: str) -> str:
     """Classify a Cowrie SSH client version using the existing heuristics."""
     normalized_version = ssh_version.lower()
@@ -282,7 +323,7 @@ def normalize_cowrie(raw: dict[str, Any]) -> dict[str, Any]:
         "mitre_technique": mitre_technique,
         "mitre_tactic": mitre_tactic,
         "details": json.dumps(details) if details else None,
-        "raw_data": json.dumps(raw),
+        "raw_data": json.dumps(_redact_sensitive(raw)),
     }
 
 
@@ -437,17 +478,42 @@ def push_to_loki(events: list[dict[str, Any]]) -> None:
 
 
 def _update_session(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
-    """Create a session row or increment its event count."""
+    """Create or update session aggregates for an inserted event."""
     session_id = event["session_id"]
     session = conn.execute(
-        "SELECT session_id FROM sessions WHERE session_id = ?",
+        """SELECT start_time, end_time, event_count,
+                  mitre_techniques, layers_reached
+           FROM sessions WHERE session_id = ?""",
         (session_id,),
     ).fetchone()
 
     if session:
+        techniques = json.loads(session[3] or "[]")
+        layers = json.loads(session[4] or "[]")
+        technique = event["mitre_technique"]
+        if technique and technique not in techniques:
+            techniques.append(technique)
+        layer = event["source_service"]
+        if layer and layer not in layers:
+            layers.append(layer)
+        start_time = session[0]
+        if _timestamp_order(event["timestamp"]) < _timestamp_order(start_time):
+            start_time = event["timestamp"]
+        end_time = session[1]
+        if not end_time or _timestamp_order(event["timestamp"]) >= _timestamp_order(end_time):
+            end_time = event["timestamp"]
         conn.execute(
-            "UPDATE sessions SET event_count = event_count + 1 WHERE session_id = ?",
-            (session_id,),
+            """UPDATE sessions SET start_time = ?, end_time = ?,
+                      event_count = event_count + 1,
+                      mitre_techniques = ?, layers_reached = ?
+               WHERE session_id = ?""",
+            (
+                start_time,
+                end_time,
+                json.dumps(techniques),
+                json.dumps(layers),
+                session_id,
+            ),
         )
         return
 
@@ -460,7 +526,7 @@ def _update_session(conn: sqlite3.Connection, event: dict[str, Any]) -> None:
             event["source_ip"],
             event["source_service"],
             event["timestamp"],
-            None,
+            event["timestamp"],
             1,
             json.dumps(mitre_list),
             json.dumps(layers),

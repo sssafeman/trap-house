@@ -9,7 +9,10 @@ from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("TRAP_HOUSE_URL", "http://localhost:8001")
 TARGET_IP = os.environ.get("TRAP_HOUSE_REPLAY_IP", "130.12.180.51")
-TARGET_SESSION = os.environ.get("TRAP_HOUSE_REPLAY_SESSION", "")
+TARGET_SESSION = os.environ.get(
+    "TRAP_HOUSE_REPLAY_SESSION",
+    "594b9428ab28",
+)
 OUTPUT_DIR = Path(
     os.environ.get(
         "TRAP_HOUSE_CAPTURE_DIR",

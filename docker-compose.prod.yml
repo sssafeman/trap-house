@@ -1,5 +1,5 @@
 # Trap House production override.
-# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d
+# Usage: COMPOSE_ENV_FILES=.env.hetzner docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # Ports and interface bindings come from the base compose plus .env.hetzner
 # (host SSH stays on 22, Endlessh tarpit on 22222, deception-gw on 80, Grafana

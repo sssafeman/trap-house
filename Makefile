@@ -10,6 +10,7 @@ logs:
 	docker compose logs -f
 
 test:
+	python3 -m unittest discover -s tests -v
 	./verify.sh
 
 clean:
@@ -17,10 +18,10 @@ clean:
 
 # Production targets (Hetzner)
 prod-up:
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d
+	COMPOSE_ENV_FILES=.env.hetzner docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 prod-down:
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner down
+	COMPOSE_ENV_FILES=.env.hetzner docker compose -f docker-compose.yml -f docker-compose.prod.yml down
 
 prod-logs:
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner logs -f
+	COMPOSE_ENV_FILES=.env.hetzner docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f

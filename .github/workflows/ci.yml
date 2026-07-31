@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install lint dependencies
-        run: python -m pip install --quiet pyyaml
+        run: python -m pip install -q pyyaml
 
       - name: Byte-compile all Python services
         run: |
@@ -38,9 +38,8 @@ jobs:
           cp .env.example .env
           sed -i 's/^SESSION_SECRET=.*/SESSION_SECRET=ci-only-session-secret/' .env
           sed -i 's/^GRAFANA_ADMIN_PASSWORD=.*/GRAFANA_ADMIN_PASSWORD=ci-only-grafana-password/' .env
-          docker compose --env-file .env config >/dev/null
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-            --env-file .env config >/dev/null
+          docker compose config >/dev/null
+          COMPOSE_ENV_FILES=.env docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
 
       - name: ShellCheck scripts
         run: |

@@ -47,13 +47,13 @@ services/frontend/
 ### API Endpoints (FastAPI, querying SQLite)
 
 | Method | Path | Query | Returns |
-|--------|------|-------|---------|
+|========|======|=======|=========|
 | GET | /api/stats | Summary counts from events, sessions, and techniques tables, plus 24 hour deltas | {events, attackers, sessions, techniques, events_24h, attackers_24h} |
 | GET | /api/attackers | SELECT source_ip, event_count, session_count, risk_score, tools_detected, mitre_techniques, top_username, last_seen FROM attackers ORDER BY risk_score DESC LIMIT 100 | [{source_ip, event_count, ...}] |
 | GET | /api/events | SELECT event_id, timestamp, source_service, source_ip, event_type, mitre_technique, command, username FROM events ORDER BY timestamp DESC LIMIT ?offset= | [{event_id, timestamp, ...}] |
 | GET | /api/events/filter | WHERE source_service=? AND event_type=? AND source_ip=? | filtered events |
 | GET | /api/techniques | SELECT technique_id, name, tactic, count(*) as count FROM techniques GROUP BY technique_id ORDER BY count DESC | [{technique_id, name, tactic, count}] |
-| GET | /api/sessions | SELECT session_id, source_ip, source_service, start_time, end_time, event_count, mitre_techniques, layers_reached FROM sessions ORDER BY start_time DESC LIMIT 50 | [{session_id, ...}] |
+| GET | /api/sessions | Aggregate session metadata from events, including observed start and last event time | [{session_id, ...}] |
 | GET | /api/sessions/{id}/events | SELECT event_id, timestamp, event_type, source_service, command, username, mitre_technique FROM events WHERE session_id=? ORDER BY timestamp | [{event_id, ...}] |
 | GET | /api/attack-map | SELECT source_ip, count(*) as attacks FROM events WHERE source_ip != '' GROUP BY source_ip ORDER BY attacks DESC LIMIT 100 | [{source_ip, attacks}] |
 | GET | /api/timeline | SELECT timestamp, event_type, source_service, source_ip FROM events ORDER BY timestamp DESC LIMIT 200 | [{timestamp, event_type, ...}] |

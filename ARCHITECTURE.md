@@ -11,24 +11,24 @@ open it directly.
                            |
                     trap-external (bridge)
                            |
-        +----------+-------+--------+-------------+
+        +==========+=======+========+=============
         |          |                |             |
     endlessh    cowrie         deception-gw    (frontend/grafana
-    (tarpit)   (honeypot)       (FastAPI)       host ports bound
-        |          |                |            to 127.0.0.1)
+    (tarpit)   (honeypot)       (FastAPI)       internal only)
+        |          |                |            host ports bound
         |          |  JSON logs     |
-        +----------+----------------+
+        +==========+================
                    |
           data/logs, data/db (bind mounts on the host)
                    |
     trap-internal (bridge, internal: true)
                    |
-   +-----------+---+------------+-----------+---------+
+   +===========+===+============+===========+=========+
    |           |                |           |         |
  socket-    log-shipper     mitre-mapper  loki     grafana
  proxy         |                |           ^         ^
  (docker    writes           reads/writes   |         |
-  API)      SQLite +          SQLite         +---------+
+  API)      SQLite +          SQLite         +=========+
    ^         Loki              |          frontend reads SQLite (ro)
    |          |                |          and serves the SOC dashboard
  endlessh    (log-shipper reads endlessh logs
@@ -39,9 +39,8 @@ open it directly.
 
 ### trap-external
 Attacker-facing bridge. Services here accept inbound connections from the
-internet. Containers: endlessh, cowrie, deception-gw. The frontend and grafana
-also attach here only so their host ports (bound to 127.0.0.1) work; they expose
-nothing to the internet.
+internet. Containers: endlessh, cowrie, and deception-gw. The frontend and grafana stay
+on the internal network because their host ports are loopback-only.
 
 ### trap-internal
 Backend bridge with `internal: true`, so these containers cannot reach the
@@ -56,9 +55,10 @@ frontend.
 
 ## Container Specifications
 
-All images are pinned by sha256 digest. Every service drops all capabilities,
-sets `no-new-privileges`, has memory/PID/CPU ceilings, and rotates its
-json-file logs.
+All images are pinned by sha256 digest. Most application services drop all
+capabilities, set `no-new-privileges`, have memory, PID, and CPU ceilings, and
+rotate json-file logs. The socket proxy keeps its image-required writable
+configuration path.
 
 ### endlessh
 - Image: `lscr.io/linuxserver/endlessh` (digest-pinned)
@@ -114,14 +114,14 @@ json-file logs.
 ### grafana
 - Image: `grafana/grafana:11.5.2` (digest-pinned)
 - Host port: `${GRAFANA_PORT}` -> 3000, bound to 127.0.0.1 (SSH tunnel)
-- Networks: trap-internal, trap-external (localhost host port only)
+- Network: trap-internal
 - Read-only rootfs: no (writable data volume)
 - Purpose: metrics dashboard over Loki. Anonymous access disabled in prod.
 
 ### frontend
 - Image: custom build (`services/frontend/Dockerfile`)
 - Host port: `${FRONTEND_PORT}` -> 8001, bound to 127.0.0.1 (SSH tunnel)
-- Networks: trap-external (localhost host port), trap-internal
+- Network: trap-internal
 - Read-only rootfs: yes (tmpfs for /tmp)
 - Purpose: custom FastAPI SOC dashboard. Reads the SQLite store read-only and
   serves the Leaflet attack map, MITRE heatmap, session replay, and timeline.
@@ -129,7 +129,7 @@ json-file logs.
 ## Port Mapping
 
 | Service       | Container Port | Dev Host Port | Prod Host Port     |
-|---------------|----------------|---------------|--------------------|
+|===============|================|===============|====================|
 | host SSH      | n/a            | (your box)    | 22                 |
 | endlessh      | 2222           | 22222         | 22222              |
 | cowrie SSH    | 2222           | 2222          | 2222               |

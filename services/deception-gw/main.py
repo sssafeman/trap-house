@@ -149,6 +149,10 @@ async def login_submit(
     ip, port = _source(request)
     ua = _ua(request)
     expected = config.DECOY_CREDENTIALS.get(username)
+    credential_source = config.CREDENTIAL_SOURCE.get(username, "decoy")
+    if expected is None:
+        expected = config.DEEPER_CREDENTIALS.get(username)
+        credential_source = "maze_deeper_decoy"
     if expected is not None and password == expected:
         maze.reset_failures(ip)
         session = maze.new_session(username)
@@ -157,7 +161,7 @@ async def login_submit(
             {
                 "username": username,
                 "password": "[REDACTED]",
-                "credentials_source": config.CREDENTIAL_SOURCE.get(username, "decoy"),
+                "credentials_source": credential_source,
             },
             user_agent=ua,
         )
@@ -245,6 +249,9 @@ async def admin_users(request: Request) -> Response:
 
 @app.get("/api/users")
 async def api_users(request: Request, search: str = "") -> JSONResponse:
+    session = _require_session(request)
+    if not session:
+        return JSONResponse({"error": "authentication required"}, status_code=401)
     ip, port = _source(request)
     ua = _ua(request)
     lowered = search.lower()
@@ -252,10 +259,8 @@ async def api_users(request: Request, search: str = "") -> JSONResponse:
 
     if is_injection:
         rows = FAKE_USERS
-        sess = _session(request)
-        session_id = sess.get("session_id") if sess else None
         logger.log_event(
-            "sql_injection", ip, port, session_id,
+            "sql_injection", ip, port, session["session_id"],
             {"endpoint": "/api/users", "payload": search, "rows_returned": len(rows)},
             user_agent=ua,
         )
@@ -275,7 +280,7 @@ async def api_users(request: Request, search: str = "") -> JSONResponse:
 
 
 @app.get("/admin/files", response_class=HTMLResponse)
-async def admin_files(request: Request) -> Response:
+async def admin_files(request: Request, error: str | None = None) -> Response:
     session = _require_session(request)
     if not session:
         return RedirectResponse(url="/login", status_code=302)
@@ -289,6 +294,7 @@ async def admin_files(request: Request) -> Response:
             "company": config.COMPANY_NAME,
             "uploads": uploads if isinstance(uploads, list) else [],
             "output": None,
+            "error": error,
         },
     )
     _persist(response, session)
@@ -315,20 +321,24 @@ async def admin_upload(request: Request, file: UploadFile) -> Response:
             },
             user_agent=ua,
         )
-        response = RedirectResponse(url="/admin/files", status_code=302)
+        response = RedirectResponse(url="/admin/files?error=file_too_large", status_code=302)
         _persist(response, session)
         return response
     content = raw.decode("utf-8", errors="replace")
     sandbox = _get_sandbox(session["session_id"])
     filename = file.filename or "upload.bin"
-    path = sandbox.upload(filename, content)
+    path, accepted = sandbox.upload(filename, content)
     session["files_accessed"] = session.get("files_accessed", 0) + 1
+    details = {"filename": filename, "upload_path": path, "file_size": len(raw)}
+    if not accepted:
+        details["rejected"] = "sandbox_limit"
     logger.log_event(
         "webshell_upload", ip, port, session["session_id"],
-        {"filename": filename, "upload_path": path, "file_size": len(raw)},
+        details,
         user_agent=ua,
     )
-    response = RedirectResponse(url="/admin/files", status_code=302)
+    target = "/admin/files" if accepted else "/admin/files?error=sandbox_limit"
+    response = RedirectResponse(url=target, status_code=302)
     _persist(response, session)
     return response
 

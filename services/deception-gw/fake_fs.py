@@ -94,32 +94,36 @@ class WebshellSandbox:
         self,
         listing: FakeEntry | None,
         content_length: int,
+        existing_size: int = 0,
+        is_new: bool = True,
     ) -> bool:
-        """Check the byte and file ceilings for a new upload."""
-        if self._stored_bytes + content_length > config.MAX_SANDBOX_BYTES:
+        """Check the byte and file ceilings for an upload."""
+        projected_bytes = self._stored_bytes - existing_size + content_length
+        if projected_bytes > config.MAX_SANDBOX_BYTES:
             return False
-        if isinstance(listing, list) and len(listing) >= config.MAX_SANDBOX_FILES:
+        if isinstance(listing, list) and is_new and len(listing) >= config.MAX_SANDBOX_FILES:
             return False
         return True
 
-    def upload(self, filename: str, content: str) -> str:
-        """Store an uploaded file in the fake uploads directory. Returns the
-        fake path the file was 'written' to.
+    def upload(self, filename: str, content: str) -> tuple[str, bool]:
+        """Store an uploaded file in the fake uploads directory.
 
-        Enforces per-sandbox file-count and total-byte ceilings so a single
-        attacker cannot grow one sandbox without bound.
+        Returns the fake path and whether the content was accepted. Replacing a
+        file updates byte accounting instead of charging the sandbox twice.
         """
         safe_name = _safe_upload_name(filename)
         path = f"{UPLOAD_DIRECTORY}/{safe_name}"
         listing = self.fs.get(UPLOAD_DIRECTORY)
+        existing = self.fs.get(path)
+        existing_size = len(existing) if isinstance(existing, str) else 0
         is_new = not (isinstance(listing, list) and safe_name in listing)
-        if is_new and not self._has_upload_capacity(listing, len(content)):
-            return path
-        self._stored_bytes += len(content)
+        if not self._has_upload_capacity(listing, len(content), existing_size, is_new):
+            return path, False
+        self._stored_bytes = self._stored_bytes - existing_size + len(content)
         self.fs[path] = content
         if isinstance(listing, list) and safe_name not in listing:
             listing.append(safe_name)
-        return path
+        return path, True
 
     def execute(self, raw: str) -> str:
         """Match a command against the whitelist and return fake output."""

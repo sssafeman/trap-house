@@ -122,7 +122,7 @@ print()
 print("## Last 10 Events")
 print()
 print("| timestamp | service | port | type | source_ip | user | command |")
-print("|-----------|---------|------|------|-----------|------|---------|")
+print("|===========|=========|======|======|===========|======|=========|")
 for ip, t, s, ts, dp, u, cmd in recent:
     u = u or ""
     cmd = cmd or ""

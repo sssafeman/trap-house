@@ -7,7 +7,7 @@ source of truth where it differs from this document.
 The deception-gw is a FastAPI fake corporate web app that attackers reach after finding decoy credentials in Cowrie. It implements a 5-layer deception maze that wastes attacker time while logging every interaction to the shared event schema.
 
 ## Goal
-Feed attackers believable fake data and keep them going in circles, while producing high-value intelligence: credentials tried, SQL injection attempts, webshell uploads, file accesses, and canarytoken triggers.
+Feed attackers believable fake data and keep them going in circles, while producing high-value intelligence: credentials tried, SQL injection attempts, webshell uploads, file accesses, and local canary-mode events.
 
 ## 5 Deception Layers
 
@@ -23,7 +23,7 @@ Displays fake company stats and navigation to admin tools.
 ### Layer 3: SQL Injection in User Search
 Route: GET /api/users?search=... (also accessible via /admin/users)
 Intentional SQL injection vulnerability in the search parameter.
-Returns 10,000 fake users. Some emails are canarytoken-laced.
+Returns 10,000 fake users. Some emails are clearly labeled decoy values.
 Also exposes a fake "flag": comment in SQL result suggests further admin access.
 
 ### Layer 4: Webshell Upload
@@ -32,9 +32,9 @@ Accepts file uploads including .php, .asp, .jsp.
 Uploaded "webshell" executes against an in-memory fake filesystem.
 Commands are parsed and logged. No real execution.
 
-### Layer 5: Fake AWS Keys and Maze Loop
+### Layer 5: Fake AWS Keys and Local Canary Mode
 Route: GET /admin/config
-Displays fake AWS access keys and secret keys. Keys contain canarytoken triggers.
+Displays fake AWS access keys and secret keys. Values are labeled decoys and are never sent to an external service.
 Route: GET /admin/backup
 Fake backup page with DB credentials that lead back to /login (infinite loop).
 
@@ -49,21 +49,21 @@ Fake backup page with DB credentials that lead back to /login (infinite loop).
        v
   /dashboard (Layer 2)
        |
-       +--> /admin/users (Layer 3: SQL injection)
+       +=> /admin/users (Layer 3: SQL injection)
        |         |
-       |         +--> /api/users?search=' OR 1=1 --
+       |         +=> /api/users?search=SQLI_COMMENT_MARKER
        |         |
        v
-       +--> /admin/files (Layer 4: webshell upload)
+       +=> /admin/files (Layer 4: webshell upload)
        |         |
        |         v
-       +--> /admin/config (Layer 5: fake AWS keys + canarytokens)
+       +=> /admin/config (Layer 5: fake AWS keys + local canary mode)
        |
        v
   /admin/backup
        |
-       +--> gives credentials that only work on /login
-       +--> maze loops back to start
+       +=> gives credentials that only work on /login
+       +=> maze loops back to start
 ```
 
 Sessions tracked via signed cookie: session_id, current_layer, failed_logins, commands_run, files_accessed.
@@ -85,7 +85,7 @@ Additional decoy credentials planted deeper in the maze:
 ## Routes
 
 | Method | Path | Purpose | Auth |
-|--------|------|---------|------|
+|========|======|=========|======|
 | GET | / | Redirect to /login | No |
 | GET | /health | Health check | No |
 | GET | /login | Login page | No |
@@ -94,7 +94,7 @@ Additional decoy credentials planted deeper in the maze:
 | GET | /dashboard | Main dashboard | Yes |
 | GET | /admin | Admin index | Yes |
 | GET | /admin/users | User search page | Yes |
-| GET | /api/users | JSON API with SQL injection | No |
+| GET | /api/users | JSON API with SQL injection | Yes |
 | GET | /admin/files | File manager / webshell upload page | Yes |
 | POST | /admin/upload | Handle file upload | Yes |
 | POST | /admin/shell | Webshell command execution (sandboxed) | Yes |
@@ -103,7 +103,7 @@ Additional decoy credentials planted deeper in the maze:
 
 ## SQL Injection Implementation (Safe)
 
-The /api/users endpoint takes a search parameter. It detects SQL injection patterns (OR, UNION, --, ;, etc.) and returns the full fake dataset (10,000 rows). No real SQL query is constructed with attacker input. The dataset is entirely fake, stored in an in-memory list.
+The /api/users endpoint takes a search parameter. It detects SQL injection patterns such as OR, UNION, comment markers, and semicolons, then returns the full fake dataset (10,000 rows). No real SQL query is constructed with attacker input. The dataset is entirely fake, stored in an in-memory list.
 
 Result includes:
 - id, name, email, department, role
@@ -130,13 +130,13 @@ Command parsing (whitelist, no real execution):
 
 No subprocess, no os.system, no eval, no exec.
 
-## Canarytoken Integration
+## Local Canary Mode
 
-Controlled by environment variable ENABLE_CANARYTOKENS (default false).
+Controlled by environment variable `ENABLE_CANARYTOKENS` (default false).
 
-If enabled: fake AWS key use is recorded locally with mode `live`.
-If disabled: canary events are logged locally as `would_trigger_canary`.
-The current implementation does not make outbound canary webhook requests.
+If enabled, fake AWS key use is recorded locally with mode `live`.
+If disabled, events are logged locally as `would_trigger_canary`.
+The current implementation does not make outbound webhook requests.
 
 ## Logging
 
@@ -187,7 +187,7 @@ services/deception-gw/
 ## Security Constraints
 
 - No real filesystem access for webshell
-- No outbound network except optional canarytokens webhook
+- No outbound network from the deception app
 - Runs as non-root user (UID 1000)
 - Capabilities dropped
 - No-new-privileges
@@ -200,7 +200,7 @@ Verification for Phase 2:
 2. GET /login returns login page (200)
 3. POST /login with decoy credentials returns 302 to /dashboard
 4. POST /login with wrong password triggers progressive delay
-5. GET /api/users?search=' OR 1=1 -- returns 10000 rows
+5. GET /api/users?search=SQLI_COMMENT_MARKER returns 10000 rows
 6. POST /admin/upload with .php file succeeds
 7. POST /admin/shell with cmd=whoami returns fake root response
 8. Events appear in SQLite via log-shipper

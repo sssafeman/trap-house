@@ -46,11 +46,11 @@ chmod -R a+rX config/grafana/provisioning
 
 # Build custom images
 echo "[2/4] Building Docker images..."
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file "$ENV_FILE" build
+COMPOSE_ENV_FILES="$ENV_FILE" docker compose -f docker-compose.yml -f docker-compose.prod.yml build
 
 # Start the stack
 echo "[3/4] Starting Trap House stack..."
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file "$ENV_FILE" up -d
+COMPOSE_ENV_FILES="$ENV_FILE" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # Wait for services to start
 echo "[4/4] Verifying services..."

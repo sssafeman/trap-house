@@ -55,11 +55,11 @@ details: { "command": "whoami", "output": "root", "exit_code": 0 }
 
 ### file_access
 Attacker accessed a decoy file.
-details: { "file_path": "/home/admin/.env", "file_type": "decoy_credential", "canarytoken_id": "abc123" }
+details: { "file_path": "/home/admin/.env", "file_type": "decoy_credential", "canary_mode": "local" }
 
 ### sql_injection
 Attacker performed SQL injection on deception-gw.
-details: { "endpoint": "/api/users", "payload": "' OR 1=1 --", "rows_returned": 10000 }
+details: { "endpoint": "/api/users", "payload": "SQLI_COMMENT_MARKER", "rows_returned": 10000 }
 
 ### webshell_upload
 Attacker uploaded a webshell.
@@ -68,7 +68,7 @@ details: { "filename": "shell.php", "upload_path": "/var/www/uploads/shell.php",
 ### credential_use
 Decoy credential was used. The current implementation records the configured
 canary mode locally and does not call an external canary service.
-details: { "credential_type": "aws_key", "credential_id": "DECOY_AWS_CANARY_ID", "canarytoken_triggered": true }
+details: { "credential_type": "aws_key", "credential_id": "DECOY_AWS_CANARY_ID", "canary_mode": "local", "mode": "would_trigger_canary" }
 
 ### tarpit_connect
 Connection accepted by Endlessh tarpit.
@@ -78,7 +78,7 @@ tarpit_disconnect from CLOSE lines is a possible future addition.)
 
 ## Session Tracking
 
-Every attacker interaction is grouped into a session. A session starts when an attacker connects to any honeypot service and ends after 30 minutes of inactivity. Sessions track the attacker's journey through the deception layers.
+Every interaction is grouped by session ID. The dashboard derives observed start time, last event time, event count, and reached layers from events. It does not infer a clean inactivity close time.
 
 ```json
 {

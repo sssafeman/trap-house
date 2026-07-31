@@ -4,6 +4,7 @@
 
 (function () {
   const REFRESH_SECONDS = 10;
+  const ARCHIVED = document.body.dataset.archiveMode === "true";
   let countdown = REFRESH_SECONDS;
 
   async function fetchJSON(url) {
@@ -45,6 +46,11 @@
   function markUpdated(ok) {
     const dot = document.getElementById("live-dot");
     const label = document.getElementById("live-label");
+    if (ARCHIVED) {
+      if (dot) dot.classList.add("archived");
+      if (label) label.textContent = "ARCHIVED";
+      return;
+    }
     if (dot) dot.classList.toggle("stale", !ok);
     if (label) label.textContent = ok ? "LIVE" : "STALE";
     if (ok) {
@@ -72,8 +78,8 @@
     if (dAttackers) {
       const n = s.attackers_24h || 0;
       dAttackers.innerHTML = n > 0
-        ? '<span class="delta-chip delta-up">+' + n + "</span> new in 24h"
-        : '<span class="delta-chip delta-flat">0</span> new in 24h';
+        ? '<span class="delta-chip delta-up">+' + n + "</span> active in 24h"
+        : '<span class="delta-chip delta-flat">0</span> active in 24h';
     }
   }
 
@@ -254,7 +260,7 @@
     updateClock();
     setInterval(updateClock, 1000);
     refreshAll();
-    setInterval(tickCountdown, 1000);
+    if (!ARCHIVED) setInterval(tickCountdown, 1000);
   }
 
   if (document.readyState === "loading") {

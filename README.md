@@ -32,7 +32,7 @@ The live collection ran from 2026-06-30 to 2026-07-31 on a public VPS. The VPS i
 
 The complete report is in [docs/final-report.md](docs/final-report.md).
 
-![Dashboard stats bar showing live totals for events, unique attackers, sessions, and MITRE techniques](docs/img/stats-bar.png)
+![Dashboard stats bar showing frozen totals for events, unique attackers, sessions, and MITRE techniques](docs/img/stats-bar.png)
 
 > **Case study: repeated Outlaw or RedTail activity.** Source 130.12.180.51 produced 992 events across 75 sessions, 75 accepted decoy logins, 423 uploads, and 65 persistence and dropper command sequences. It prepared SSH key persistence with `chattr +ai`, detected the architecture, uploaded architecture-specific binaries, and attempted deployment. A second source replayed the same tooling pattern. The honeypot logged everything and executed nothing. Full breakdown in [RESULTS.md](RESULTS.md).
 
@@ -215,12 +215,15 @@ trap-house/
     PHASE4_DESIGN.md          # Dashboard design spec
     img/                      # Dashboard screenshots and kill chain animation
   scripts/
-    capture_dashboard.py      # Reproduce dashboard screenshots
+    capture_dashboard.py      # Reproduce dashboard screenshots and replay
     digest.sh                 # Historical VPS stats digest
+  tests/
+    test_data_integrity.py    # Redaction, session, and sandbox regression tests
   services/
     cowrie/
       cowrie.cfg              # Cowrie configuration overrides
       honeyfs/home/admin/     # Decoy .env and README files
+      scripts/start_cowrie.py # Builds the custom filesystem at startup
     deception-gw/
       main.py                 # FastAPI app with 14 routes
       config.py               # Decoy credentials, AWS keys, session config
@@ -269,8 +272,9 @@ With the frontend running, the capture utility writes the dashboard assets to
 python scripts/capture_dashboard.py
 ```
 
-The frontend exposes only the most recent sessions. To capture a specific
-historical replay, provide its session ID from the frozen database:
+The frontend exposes only the most recent sessions by default. The utility
+uses the frozen Outlaw replay session `594b9428ab28` automatically. Override it
+when capturing another historical session:
 
 ```bash
 TRAP_HOUSE_REPLAY_SESSION=<session-id> python scripts/capture_dashboard.py
@@ -334,91 +338,21 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 your_username@your-vps-ip
 | 3000 | Grafana | Loopback only (SSH tunnel) |
 | 8001 | SOC Dashboard | Loopback only (SSH tunnel) |
 
-## Production Deployment (Oracle Cloud Free Tier)
-
-Oracle Cloud offers a permanently free tier with ARM instances (Ampere A1, up to 24GB RAM). This is sufficient for the full 9-container stack.
-
-### Oracle Cloud setup
-
-1. Sign up at cloud.oracle.com (requires a credit card for verification, not charged).
-
-2. Create a compute instance:
-   - Shape: VM.Standard.A1.Flex (ARM, Ampere A1)
-   - Image: Ubuntu 24.04 (Canonical)
-   - OCPUs: 2, Memory: 8GB (within free tier limits)
-   - Save your SSH private key
-
-3. Open ports in Oracle's Security List (VCN > Security Lists):
-   - Port 22: Host SSH (admin access, key-only)
-   - Port 80: Deception-gw HTTP
-   - Port 2222: Cowrie SSH
-   - Port 2223: Cowrie Telnet
-   - Port 22222: Endlessh tarpit
-
-   Oracle's cloud firewall blocks all ports by default. UFW on the host is not enough.
-
-4. SSH into the instance (Oracle uses `ubuntu` as the default user):
-
-```bash
-ssh ubuntu@your-oracle-ip
-```
-
-5. Clone and harden:
-
-```bash
-sudo apt-get update && sudo apt-get install -y git
-git clone https://github.com/sssafeman/trap-house /opt/trap-house
-cd /opt/trap-house
-sudo bash deploy/harden.sh ubuntu
-```
-
-6. Reconnect after hardening (admin SSH stays on port 22 unless you changed it):
-
-```bash
-ssh ubuntu@your-oracle-ip
-```
-
-7. Configure and deploy:
-
-```bash
-cd /opt/trap-house
-cp .env.hetzner.example .env.hetzner
-# Edit .env.hetzner: set SESSION_SECRET and GRAFANA_ADMIN_PASSWORD
-# Generate SESSION_SECRET: python3 -c "import secrets; print(secrets.token_hex(32))"
-nano .env.hetzner
-sudo bash deploy/deploy.sh
-```
-
-8. Access dashboards via SSH tunnel:
-
-```bash
-ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
-# Then open:
-#   http://localhost:8001  (SOC Dashboard)
-#   http://localhost:3000  (Grafana)
-```
-
-### Oracle Cloud notes
-
-- All Docker images in this project support ARM64 (Ampere A1). No architecture changes needed.
-- Oracle may reclaim idle free tier instances. A honeypot receiving traffic should stay active.
-- Bandwidth limit: 10 TB/month outbound. Honeypot log traffic will not approach this.
-- If Oracle rejects your signup, try a different browser or card. The process is known to be finicky.
-
 ## Security Posture
 
 ### Container security
 
 - All images pinned by sha256 digest (never `:latest`)
-- All containers drop ALL Linux capabilities, `no-new-privileges` on every container
+- Most application containers drop ALL Linux capabilities, with `no-new-privileges` and resource ceilings applied where image startup permits
 - `read_only` rootfs on the four Python services (deception-gw, log-shipper, mitre-mapper, frontend)
 - Cowrie runs as UID 999; deception-gw, frontend, log-shipper, mitre-mapper run as UID 1000 (non-root)
+- The socket proxy is limited to container reads with `POST=0`; its image-required HAProxy configuration path remains writable
 - Per-service memory, PID, and CPU limits; json-file log rotation on every container
 - The log-shipper reads the Docker API through a scoped, read-only socket-proxy, never the raw socket
 - The core internal network has `internal: true`. Services needing explicit
   external egress are attached to the separate external network and covered by
   the host egress policy.
-- No subprocess, eval, exec, or os.system in any custom code
+- The deception sandbox has no subprocess, eval, or os.system path. The Cowrie startup wrapper invokes only the pinned filesystem builder before the daemon
 - Webshell sandbox is pure in-memory dict lookup with hard size ceilings, no real execution
 - X-Forwarded-For is ignored unless a trusted proxy is declared, so logged source IPs cannot be spoofed
 

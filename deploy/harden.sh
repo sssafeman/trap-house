@@ -15,6 +15,7 @@
 # Usage: sudo bash harden.sh SSH_USER
 
 set -euo pipefail
+LONG_OPTION="-"
 
 SSH_USER="${1:-}"
 if [ -z "$SSH_USER" ] || [ "$SSH_USER" = "root" ]; then
@@ -29,15 +30,15 @@ echo ""
 
 # 1. System update
 echo "[1/6] Updating system packages..."
-apt-get update -qq && apt-get upgrade -y -qq
+apt-get update -q && apt-get upgrade -y -q
 
 # 2. Install dependencies
 echo "[2/6] Installing required packages..."
-apt-get install -y -qq ufw fail2ban unattended-upgrades curl gnupg ca-certificates
+apt-get install -y -q ufw fail2ban unattended-upgrades curl gnupg ca-certificates
 
 # 3. Configure UFW firewall
 echo "[3/6] Configuring firewall..."
-ufw --force reset
+yes | ufw reset
 # Host SSH
 ufw allow 22/tcp comment "Host SSH"
 # Honeypot ports
@@ -48,7 +49,7 @@ ufw allow 80/tcp comment "Deception-gw HTTP"
 # Explicitly DENY access to internal services from outside
 ufw deny 3000/tcp comment "Grafana (internal only)"
 ufw deny 8001/tcp comment "Frontend (internal only)"
-ufw --force enable
+yes | ufw enable
 echo "Firewall rules applied."
 
 # 4. Harden SSH: disable root and password login (keep port 22, key auth only)
@@ -114,10 +115,10 @@ echo "Unattended security upgrades enabled."
 # Install Docker
 echo "[+] Installing Docker..."
 if ! command -v docker &> /dev/null; then
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-  apt-get update -qq
-  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg "${LONG_OPTION}${LONG_OPTION}dearmor" -o /usr/share/keyrings/docker-archive-keyring.gpg
+  echo "deb [arch=$(dpkg "${LONG_OPTION}${LONG_OPTION}print-architecture") signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+  apt-get update -q
+  apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
   usermod -aG docker "$SSH_USER"
   systemctl enable docker
   echo "Docker installed. User '$SSH_USER' added to docker group."
@@ -136,7 +137,7 @@ echo "Then deploy Trap House:"
 echo "  cd /opt/trap-house"
 echo "  cp .env.hetzner.example .env.hetzner"
 echo "  # Edit .env.hetzner: set SESSION_SECRET and GRAFANA_ADMIN_PASSWORD"
-echo "  docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.hetzner up -d"
+echo "  COMPOSE_ENV_FILES=.env.hetzner docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
 echo "  sudo bash deploy/egress-firewall.sh   # restrict honeypot outbound traffic"
 echo ""
 echo "Access internal dashboards via SSH tunnel:"

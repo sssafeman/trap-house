@@ -1,6 +1,6 @@
-# Trap House stack. All images pinned by digest (never :latest); every service
-# drops capabilities, sets no-new-privileges, has resource ceilings, and rotates
-# its container logs.
+# Trap House stack. All images pinned by digest (never :latest); services use
+# least-privilege controls where their base images support them, resource
+# ceilings, and rotating container logs.
 
 # Shared log-rotation policy: cap each container's json-file log so a high-volume
 # honeypot cannot fill the host disk.
@@ -52,7 +52,10 @@ services:
       - ./services/cowrie/etc/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
       - ./services/cowrie/honeyfs:/cowrie/cowrie-git/honeyfs:ro
       - ./services/cowrie/scripts/build_custom_pickle.py:/opt/scripts/build_custom_pickle.py:ro
+      - ./services/cowrie/scripts/start_cowrie.py:/opt/scripts/start_cowrie.py:ro
       - cowrie-var:/cowrie/cowrie-git/var
+    entrypoint: ["/cowrie/cowrie-env/bin/python3"]
+    command: ["/opt/scripts/start_cowrie.py"]
     cap_drop:
       - ALL
     security_opt:
@@ -201,12 +204,13 @@ services:
       # Localhost-only. Reach it in prod via SSH tunnel; in dev via localhost.
       - "127.0.0.1:${FRONTEND_PORT:-8001}:8001"
     networks:
-      - trap-external
       - trap-internal
     volumes:
       - ./data/db:/data/db:ro
     environment:
       - DB_PATH=/data/db/trap-house.db
+      - ARCHIVE_MODE=${ARCHIVE_MODE:-true}
+      - COLLECTION_END_TIME=${COLLECTION_END_TIME:-2026-07-31T16:43:02Z}
       - PYTHONDONTWRITEBYTECODE=1
     read_only: true
     cap_drop:
@@ -260,7 +264,6 @@ services:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     networks:
       - trap-internal
-      - trap-external  # Dev access via localhost. Prod: SSH tunnel only.
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-local-development-only-grafana-password}
       - GF_AUTH_ANONYMOUS_ENABLED=true
@@ -294,6 +297,7 @@ volumes:
 
 networks:
   trap-external:
+    name: trap-external
     driver: bridge
   trap-internal:
     driver: bridge

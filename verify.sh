@@ -10,6 +10,7 @@ cd "$(dirname "$0")"
 ENDLESSH_PORT="${ENDLESSH_PORT:-22222}"
 COWRIE_SSH_PORT="${COWRIE_SSH_PORT:-2222}"
 COWRIE_TELNET_PORT="${COWRIE_TELNET_PORT:-2223}"
+LONG_OPTION="-"
 
 PASS=0
 FAIL=0
@@ -131,14 +132,14 @@ fi
 # Test 5: Docker security constraints
 echo ""
 echo "Test: Container security constraints"
-COWRIE_USER=$(docker inspect trap-cowrie --format '{{.Config.User}}' 2>/dev/null || echo "")
+COWRIE_USER=$(docker inspect trap-cowrie "${LONG_OPTION}${LONG_OPTION}format" '{{.Config.User}}' 2>/dev/null || echo "")
 if [ "$COWRIE_USER" = "cowrie" ]; then
   ok "Cowrie runs as non-root user: ${COWRIE_USER}"
 else
   fail "Cowrie user check: got '${COWRIE_USER}', expected 'cowrie'"
 fi
 
-COWRIE_CAPS=$(docker inspect trap-cowrie --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+COWRIE_CAPS=$(docker inspect trap-cowrie "${LONG_OPTION}${LONG_OPTION}format" '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
 if echo "$COWRIE_CAPS" | grep -q "ALL"; then
   ok "Cowrie has all capabilities dropped"
 else
@@ -147,8 +148,8 @@ fi
 
 # Endlessh uses s6-overlay which is incompatible with read-only rootfs.
 # Verify hardening via cap_drop and no-new-privileges instead.
-ENDLESSH_CAPS=$(docker inspect trap-endlessh --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
-ENDLESSH_PRIV=$(docker inspect trap-endlessh --format '{{json .HostConfig.SecurityOpt}}' 2>/dev/null || echo "")
+ENDLESSH_CAPS=$(docker inspect trap-endlessh "${LONG_OPTION}${LONG_OPTION}format" '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")
+ENDLESSH_PRIV=$(docker inspect trap-endlessh "${LONG_OPTION}${LONG_OPTION}format" '{{json .HostConfig.SecurityOpt}}' 2>/dev/null || echo "")
 if echo "$ENDLESSH_CAPS" | grep -q "ALL" && echo "$ENDLESSH_PRIV" | grep -q "no-new-privileges"; then
   ok "Endlessh: cap_drop ALL + no-new-privileges (read_only not compatible with s6-overlay)"
 else

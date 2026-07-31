@@ -21,6 +21,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 DB_PATH = os.environ.get("DB_PATH", "/data/db/trap-house.db")
+ARCHIVE_MODE = os.environ.get("ARCHIVE_MODE", "true").lower() == "true"
+COLLECTION_END_TIME = os.environ.get(
+    "COLLECTION_END_TIME", "2026-07-31T16:43:02Z"
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -133,7 +137,14 @@ async def health() -> dict[str, str]:
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
     """Serve the main dashboard page."""
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "archive_mode": ARCHIVE_MODE,
+            "collection_end_time": COLLECTION_END_TIME,
+        },
+    )
 
 
 @app.get("/api/stats")
@@ -152,10 +163,10 @@ async def api_stats() -> JSONResponse:
             (SELECT COUNT(*) FROM sessions) AS sessions,
             (SELECT COUNT(DISTINCT technique_id) FROM techniques) AS techniques,
             (SELECT COUNT(*) FROM events
-                WHERE timestamp >= datetime('now', '-24 hours')) AS events_24h,
+                WHERE datetime(timestamp) >= datetime('now', '-24 hours')) AS events_24h,
             (SELECT COUNT(DISTINCT source_ip) FROM events
                 WHERE source_ip IS NOT NULL AND source_ip != ''
-                AND timestamp >= datetime('now', '-24 hours')) AS attackers_24h
+                AND datetime(timestamp) >= datetime('now', '-24 hours')) AS attackers_24h
         """
     )
     if not stats:
@@ -257,13 +268,26 @@ async def api_sessions() -> JSONResponse:
     """Recent sessions with their event counts and layers reached."""
     rows = query(
         """
-        SELECT session_id, source_ip, source_service, start_time, end_time,
-               event_count, mitre_techniques, layers_reached
-        FROM sessions
+        SELECT session_id, MIN(source_ip) AS source_ip,
+               MIN(source_service) AS source_service,
+               MIN(timestamp) AS start_time, MAX(timestamp) AS end_time,
+               COUNT(*) AS event_count,
+               GROUP_CONCAT(DISTINCT mitre_technique) AS mitre_techniques,
+               GROUP_CONCAT(DISTINCT source_service) AS layers_reached
+        FROM events
+        WHERE session_id IS NOT NULL AND session_id != ''
+        GROUP BY session_id
         ORDER BY start_time DESC
         LIMIT 50
         """
     )
+    for row in rows:
+        row["mitre_techniques"] = _json.dumps(
+            [item for item in (row.get("mitre_techniques") or "").split(",") if item]
+        )
+        row["layers_reached"] = _json.dumps(
+            [item for item in (row.get("layers_reached") or "").split(",") if item]
+        )
     return JSONResponse(rows)
 
 

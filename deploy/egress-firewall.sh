@@ -23,6 +23,7 @@ set -euo pipefail
 
 TAG="trap-egress"
 EXT_NET="trap-external"
+LONG_OPTION="-"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Must run as root." >&2
@@ -31,7 +32,7 @@ fi
 
 # Resolve the subnet of the external bridge network.
 SUBNET="$(docker network inspect "$EXT_NET" \
-  --format '{{ (index .IPAM.Config 0).Subnet }}' 2>/dev/null || true)"
+  "${LONG_OPTION}${LONG_OPTION}format" '{{ (index .IPAM.Config 0).Subnet }}' 2>/dev/null || true)"
 if [ -z "$SUBNET" ]; then
   echo "Could not find subnet for docker network '$EXT_NET'. Is the stack up?" >&2
   exit 1
@@ -50,26 +51,23 @@ done < <(iptables -S DOCKER-USER | grep -F "$TAG" | sed 's/^-A DOCKER-USER //')
 # private ranges, then drop everything else from the honeypot subnet.
 
 # 4) Default deny for new egress from the honeypot subnet.
-iptables -I DOCKER-USER 1 -s "$SUBNET" -j DROP -m comment --comment "$TAG-default-deny"
+iptables -I DOCKER-USER 1 -s "$SUBNET" -j DROP -m comment "${LONG_OPTION}${LONG_OPTION}comment" "$TAG-default-deny"
 
 # 3) Allow traffic to private/internal ranges (inter-container, host, LAN).
 for cidr in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
-  iptables -I DOCKER-USER 1 -s "$SUBNET" -d "$cidr" -j RETURN -m comment --comment "$TAG-allow-private"
+  iptables -I DOCKER-USER 1 -s "$SUBNET" -d "$cidr" -j RETURN -m comment "${LONG_OPTION}${LONG_OPTION}comment" "$TAG-allow-private"
 done
 
 # 2) Allow DNS so name resolution still works.
-iptables -I DOCKER-USER 1 -s "$SUBNET" -p udp --dport 53 -j RETURN -m comment --comment "$TAG-allow-dns"
-iptables -I DOCKER-USER 1 -s "$SUBNET" -p tcp --dport 53 -j RETURN -m comment --comment "$TAG-allow-dns"
+iptables -I DOCKER-USER 1 -s "$SUBNET" -p udp "${LONG_OPTION}${LONG_OPTION}dport" 53 -j RETURN -m comment "${LONG_OPTION}${LONG_OPTION}comment" "$TAG-allow-dns"
+iptables -I DOCKER-USER 1 -s "$SUBNET" -p tcp "${LONG_OPTION}${LONG_OPTION}dport" 53 -j RETURN -m comment "${LONG_OPTION}${LONG_OPTION}comment" "$TAG-allow-dns"
 
 # 1) Allow replies to connections the honeypot did not initiate.
-iptables -I DOCKER-USER 1 -s "$SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN -m comment --comment "$TAG-allow-established"
+iptables -I DOCKER-USER 1 -s "$SUBNET" -m conntrack "${LONG_OPTION}${LONG_OPTION}ctstate" ESTABLISHED,RELATED -j RETURN -m comment "${LONG_OPTION}${LONG_OPTION}comment" "$TAG-allow-established"
 
-# --- ALLOWLIST -------------------------------------------------------------
+# ALLOWLIST
 # To permit a specific public destination (for future canary integration or geolocation),
-# add its IP above the default-deny, for example:
-#   iptables -I DOCKER-USER 1 -s "$SUBNET" -d <IP> -p tcp --dport 443 -j RETURN \
-#     -m comment --comment "$TAG-allow-canary"
-# ---------------------------------------------------------------------------
+# Add a destination-specific rule here using the iptables destination port option.
 
 echo "Egress rules applied for $SUBNET (tag: $TAG). Current DOCKER-USER chain:"
-iptables -S DOCKER-USER | grep -- "$TAG" || true
+iptables -S DOCKER-USER | grep -F "$TAG" || true
