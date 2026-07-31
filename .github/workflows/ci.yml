@@ -36,14 +36,16 @@ jobs:
       - name: Validate Compose files
         run: |
           cp .env.example .env
+          sed -i 's/^SESSION_SECRET=.*/SESSION_SECRET=ci-only-session-secret/' .env
+          sed -i 's/^GRAFANA_ADMIN_PASSWORD=.*/GRAFANA_ADMIN_PASSWORD=ci-only-grafana-password/' .env
           docker compose --env-file .env config >/dev/null
           docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-            --env-file .env config >/dev/null || true
+            --env-file .env config >/dev/null
 
       - name: ShellCheck scripts
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck -S warning deploy/*.sh scripts/*.sh verify.sh || true
+          shellcheck -S warning deploy/*.sh scripts/*.sh verify.sh
 
       - name: Validate MITRE technique YAML
         run: python -c "import yaml; yaml.safe_load(open('config/mitre-techniques.yaml'))"

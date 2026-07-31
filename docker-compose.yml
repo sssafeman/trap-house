@@ -75,7 +75,7 @@ services:
       - ./data/logs/deception-gw:/var/log/trap-house
     environment:
       - ENABLE_CANARYTOKENS=${ENABLE_CANARYTOKENS:-false}
-      - SESSION_SECRET=${SESSION_SECRET:-changeme-secret-key}
+      - SESSION_SECRET=${SESSION_SECRET:-local-development-only-session-secret}
       # Bound directly to the internet with no reverse proxy: do not trust XFF.
       - TRUST_XFF=${TRUST_XFF:-false}
       - CANARY_EMAIL_DOMAIN=${CANARY_EMAIL_DOMAIN:-}
@@ -262,7 +262,7 @@ services:
       - trap-internal
       - trap-external  # Dev access via localhost. Prod: SSH tunnel only.
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-local-development-only-grafana-password}
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
     volumes:

@@ -1,57 +1,74 @@
-# Trap House: Legal Framework
+# Trap House: Legal and Privacy Posture
+
+This document records the project's design boundaries. It is not legal advice. A
+real deployment should be reviewed against the operator's jurisdiction, hosting
+provider terms, privacy obligations, and incident response policy.
 
 ## Jurisdiction
-Norway. Norwegian Penal Code (Straffeloven). EU Directive 2013/40/EU via EEA agreement.
 
-## What This System Does (Legal)
-- Deploys decoy services on owned infrastructure
-- Logs attacker interactions for threat intelligence
-- Delays attackers through tarpits and deception layers
-- Maps attacker behavior to MITRE ATT&CK framework
-- Reports attacker IPs to blocklists (optional)
+The project was operated from Norway under the Norwegian Penal Code
+(Straffeloven). The official English translation identifies section 204 as
+intrusion into a computer system and section 205 as violation of the right to
+private communication:
 
-## What This System Does NOT Do (Legal Boundary)
-- Does NOT deploy malware against attackers
-- Does NOT scan or probe attacker machines
-- Does NOT execute code on attacker systems
-- Does NOT access attacker data or systems
-- Does NOT perform any offensive action regardless of provocation
+https://lovdata.no/dokument/NLE/lov/2005-05-20-28
 
-## Relevant Norwegian Law
+The collection was conducted on infrastructure controlled by the operator. The
+VPS is now powered off and the evidence is frozen locally.
 
-Strafeloven section 204: Criminalizes creating, storing, or spreading programs designed for unauthorized access. This system does not create such programs.
+## What This System Does
 
-Strafeloven section 205: Criminalizes unauthorized access to others' systems. This system does not access attacker systems.
+- Deploys decoy services on infrastructure controlled by the operator
+- Records unsolicited interactions for security monitoring and research
+- Delays attackers through a tarpit and deception layers
+- Maps observed behavior to the MITRE ATT&CK framework
+- Keeps attacker-facing code in an emulated environment
 
-Strafeloven section 18 (nødværge/self-defense): Covers imminent physical threats. Does not extend to cyber hack-back. No court has accepted cyber hack-back as self-defense.
+## What This System Does Not Do
 
-## "Active Antagonism" Reframed
-The original requirement used the phrase "active antagonism." In implementation, this means:
-- Defensive deception: presenting fake services and credentials to mislead attackers
-- Detection: logging and analyzing all attacker behavior
-- Delay: using tarpits and maze logic to waste attacker time
+- It does not deploy malware against attackers
+- It does not scan or probe attacker-controlled systems
+- It does not execute attacker binaries
+- It does not access attacker data or systems
+- It does not perform hack-back or any other offensive action
 
-It does NOT mean:
-- Degrading attacker systems
-- Scanning attacker machines
-- Deploying counter-malware
-- Any action that touches the attacker's infrastructure
+The phrase "active antagonism" is therefore implemented only as defensive
+deception, detection, and delay. No action touches the attacker's infrastructure.
 
-## Canarytokens
-Canarytokens.org integration sends attacker behavior data (IP, user agent) to a third-party service (Thinkst Canary). This is optional and toggleable via environment variable ENABLE_CANARYTOKENS=true/false.
+## Canary and External Network Behavior
 
-A local canary logger is provided as fallback. It logs canary trigger events locally without contacting any external service.
+The current repository does not send canary events to an external canary service.
+When `ENABLE_CANARYTOKENS=true`, the deception service changes the local event
+mode from `would_trigger_canary` to `live`, but the current implementation still
+records the event locally. `CANARY_EMAIL_DOMAIN` only changes the domain used in
+fake dataset email addresses.
 
-## Data Retention (Planned)
-- Logs targeted for 90 day retention
-- SQLite database targeted for 180 day retention
-- Automated cleanup not yet implemented. Until implemented, monitor disk usage manually.
-- Docker logging driver set to json-file with size limits (planned)
-- No PII stored beyond attacker IP and user agent (which are operational data, not personal data under GDPR for security purposes)
+If an operator adds a real third-party webhook, that change requires a separate
+privacy, consent, retention, and egress review. The egress firewall is designed
+to make new public destinations explicit.
 
-## Production Deployment
-When deployed on Hetzner VPS:
-- Only ports 22, 2222, 2223, and 80 exposed externally
-- Grafana and frontend accessible only via SSH tunnel
-- Host hardened: firewall, fail2ban, unattended upgrades
-- No outbound traffic from honeypot containers except canarytokens (toggleable)
+## Privacy and Retention
+
+Source IP addresses and user-agent strings can constitute personal data under
+GDPR and Norwegian data protection law. They must be handled as personal data,
+not dismissed as anonymous operational metadata. Operators should document a
+purpose, lawful basis, access controls, retention period, and data subject
+handling process before deploying a live sensor.
+
+The repository's retention controls are:
+
+- JSONL logs are intended to be retained for 90 days by `deploy/prune-data.sh`
+- SQLite event data is intended to be retained for 180 days by that script
+- Docker `json-file` logs are capped at 10 MB per file and 3 files per container
+- The final collection was closed, the VPS was powered off, and the frozen
+  evidence is stored outside version control
+
+## Production Security Boundary
+
+The historical production layout exposed only ports 22, 2222, 2223, and 80.
+Grafana and the custom frontend were bound to loopback and accessed through an
+SSH tunnel. Host hardening used a firewall, fail2ban, unattended security
+updates, key-only SSH, and an explicit honeypot egress policy.
+
+The deployment scripts remain as historical reference material. They are not a
+claim that the sensor is currently running.

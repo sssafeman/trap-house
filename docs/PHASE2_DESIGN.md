@@ -1,5 +1,8 @@
 # Trap House Phase 2: Deception Middleware Design
 
+This is the historical design specification. The final implementation is the
+source of truth where it differs from this document.
+
 ## Overview
 The deception-gw is a FastAPI fake corporate web app that attackers reach after finding decoy credentials in Cowrie. It implements a 5-layer deception maze that wastes attacker time while logging every interaction to the shared event schema.
 
@@ -68,7 +71,7 @@ Sessions tracked via signed cookie: session_id, current_layer, failed_logins, co
 ## Decoy Credentials Bridge from Cowrie
 
 Cowrie's fake filesystem contains a .env file with these credentials:
-- username: admin, password: TrapH0use!2026
+- username: admin, password: NordTech@Admin#2024
 - username: devops, password: D3v0ps_S3cur1ty
 - username: backup, password: b@ckup_s3rv3r_99
 
@@ -104,7 +107,9 @@ The /api/users endpoint takes a search parameter. It detects SQL injection patte
 
 Result includes:
 - id, name, email, department, role
-- Some emails are canarytokens (e.g., testuser123@user.canarytokens.org)
+- Some emails can use the configured `CANARY_EMAIL_DOMAIN`. The current
+  implementation records canary-mode events locally and does not call an
+  external service.
 - Fake comment at bottom: "Internal note: backup_admin has access to /admin/backup"
 
 ## Webshell Sandbox
@@ -129,8 +134,9 @@ No subprocess, no os.system, no eval, no exec.
 
 Controlled by environment variable ENABLE_CANARYTOKENS (default false).
 
-If enabled: fake AWS keys trigger canarytokens.org webhook when used outside the honeypot.
-If disabled: canary events logged locally as "would_trigger_canary" without network egress.
+If enabled: fake AWS key use is recorded locally with mode `live`.
+If disabled: canary events are logged locally as `would_trigger_canary`.
+The current implementation does not make outbound canary webhook requests.
 
 ## Logging
 
@@ -166,7 +172,7 @@ services/deception-gw/
   maze.py
   logger.py
   fake_fs.py
-  canary.py
+
   templates/
     base.html
     login.html

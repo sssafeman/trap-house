@@ -106,7 +106,7 @@ Attackers follow a path that looks like real network compromise but leads in cir
 
 1. **SSH entry (Cowrie)**: the attacker brute-forces SSH and gets in with weak credentials. They find a fake filesystem with `/home/admin/.env` containing database and web app credentials.
 2. **Web login (deception-gw)**: decoy credentials from the `.env` file work on the fake NordTech Solutions corporate portal. Progressive authentication delay slows brute force attempts (2^n seconds, capped at 30).
-3. **Admin panel and SQL injection**: the dashboard leads to an admin panel with user search. The search endpoint has an intentional (safe) SQL injection vulnerability. Injection returns 10,000 fake users. Optionally, canary email addresses (on a domain you control, set via `CANARY_EMAIL_DOMAIN`) can be seeded into the dataset to alert if an attacker ever contacts them.
+3. **Admin panel and SQL injection**: the dashboard leads to an admin panel with user search. The search endpoint has an intentional (safe) SQL injection vulnerability. Injection returns 10,000 fake users. Optionally, email addresses can use a domain you control, set via `CANARY_EMAIL_DOMAIN`, to make later outbound use observable. The current implementation only logs locally.
 4. **Webshell upload**: the admin panel accepts file uploads including `.php` webshells. The webshell "works" but executes against an in-memory fake filesystem. Commands like `whoami`, `uname -a`, `cat /etc/passwd` return believable fake output. No real execution.
 5. **Fake AWS keys and maze loop**: the admin config page shows fake AWS access keys. The admin backup page shows database credentials that lead back to the login page. The attacker goes in circles.
 
@@ -193,7 +193,6 @@ trap-house/
   RESULTS.md                  # Findings from the live deployment
   .env.example                # Dev environment config
   .env.hetzner.example        # Production environment config
-  CLAUDE.md                   # Project context for AI coding agents
   ARCHITECTURE.md             # System topology and data flow
   EVENT_SCHEMA.md             # Shared JSONL event schema
   LEGAL.md                    # Norwegian legal framework
@@ -216,7 +215,8 @@ trap-house/
     PHASE4_DESIGN.md          # Dashboard design spec
     img/                      # Dashboard screenshots and kill chain animation
   scripts/
-    digest.sh                 # Daily stats digest (cron)
+    capture_dashboard.py      # Reproduce dashboard screenshots
+    digest.sh                 # Historical VPS stats digest
   services/
     cowrie/
       cowrie.cfg              # Cowrie configuration overrides
@@ -253,11 +253,27 @@ make up
 # Verify honeypot services are running
 make test
 
-# Access the SOC dashboard
-open http://localhost:8001
+# Open the SOC dashboard in a browser
+# http://localhost:8001
 
-# Access Grafana
-open http://localhost:3000
+# Open Grafana in a browser
+# http://localhost:3000
+```
+
+### Reproduce dashboard screenshots
+
+With the frontend running, the capture utility writes the dashboard assets to
+`docs/img/` by default:
+
+```bash
+python scripts/capture_dashboard.py
+```
+
+The frontend exposes only the most recent sessions. To capture a specific
+historical replay, provide its session ID from the frozen database:
+
+```bash
+TRAP_HOUSE_REPLAY_SESSION=<session-id> python scripts/capture_dashboard.py
 ```
 
 ## Historical Production Deployment Reference
@@ -265,7 +281,7 @@ open http://localhost:3000
 The live collection used a Hetzner VPS. The host is now powered off. The commands below remain as a reference for a deliberate future redeployment.
 
 ```bash
-# 1. Create droplet: Frankfurt, Ubuntu 24.04, $32/mo Premium Intel (2 vCPU, 4GB RAM)
+# 1. Create a VPS: Frankfurt, Ubuntu 24.04, 2 vCPU, 4 GB RAM
 #    Add SSH key at creation. Skip backups, managed DB, extra volume.
 
 # 2. SSH in, give cloud-init a minute or two to finish, then clone
@@ -399,7 +415,9 @@ ssh -L 8001:localhost:8001 -L 3000:localhost:3000 ubuntu@your-oracle-ip
 - Cowrie runs as UID 999; deception-gw, frontend, log-shipper, mitre-mapper run as UID 1000 (non-root)
 - Per-service memory, PID, and CPU limits; json-file log rotation on every container
 - The log-shipper reads the Docker API through a scoped, read-only socket-proxy, never the raw socket
-- Internal network has `internal: true` (no external internet access)
+- The core internal network has `internal: true`. Services needing explicit
+  external egress are attached to the separate external network and covered by
+  the host egress policy.
 - No subprocess, eval, exec, or os.system in any custom code
 - Webshell sandbox is pure in-memory dict lookup with hard size ceilings, no real execution
 - X-Forwarded-For is ignored unless a trusted proxy is declared, so logged source IPs cannot be spoofed
@@ -430,9 +448,11 @@ This project was built in 5 phases, each producing a deployable artifact:
 
 Each phase was verified before moving to the next. `verify.sh` is a smoke test for the honeypot layer: it starts the stack and checks that Endlessh and Cowrie are listening and logging, and that the container security constraints hold. See [RESULTS.md](RESULTS.md) for the final findings from the live deployment, including 298,928 events, 2,421 attacker IPs, 12 observed technique IDs, and the full Outlaw or RedTail case study.
 
-## Daily Digest
+## Historical Daily Digest Utility
 
-A script-only cron job pulls honeypot stats daily and saves a structured markdown digest:
+The archived deployment included a script-only cron job that pulled honeypot stats
+over SSH and saved a structured markdown digest. The VPS is powered off, so this
+is retained as a historical operational utility rather than an active service:
 
 ```bash
 # Run manually

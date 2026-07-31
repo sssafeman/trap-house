@@ -7,11 +7,14 @@ import os
 # Path to the JSONL event log. The container mounts /var/log/trap-house.
 LOG_PATH: str = os.environ.get("LOG_PATH", "/var/log/trap-house/deception-gw.json")
 
-# Signing key for session cookies. Overridden by SESSION_SECRET in production.
-SESSION_SECRET: str = os.environ.get("SESSION_SECRET", "changeme-secret-key")
+# Signing key for session cookies. Production overrides this with a random
+# value through the production Compose file.
+SESSION_SECRET: str = os.environ.get(
+    "SESSION_SECRET", "local-development-only-session-secret"
+)
 
-# Canarytokens are disabled by default. When false, canary events are logged
-# locally as "would_trigger_canary" with no network egress.
+# Canary mode is disabled by default. The current implementation records the
+# mode locally and does not make external canary webhook requests.
 ENABLE_CANARYTOKENS: bool = os.environ.get("ENABLE_CANARYTOKENS", "false").lower() == "true"
 
 # Company branding for the fake corporate app.
@@ -38,11 +41,11 @@ DEEPER_CREDENTIALS: dict[str, str] = {
     "db_admin": "M@z3Loop#999",
 }
 
-# Fake AWS keys shown on /admin/config. The access key id embeds a canary
-# marker so it is recognizable if it ever shows up in real logs.
-FAKE_AWS_ACCESS_KEY: str = "AKIA3Q7M2X9K4R8PJX9C"
-FAKE_AWS_SECRET_KEY: str = "aB3kF9mN2pQ7rT4vW8xZ6sD1cE5gH0jL3iU9oY2n"
-FAKE_AWS_CANARY_ID: str = "AKIA3Q7M2X9K4R8PJX9C"
+# Clearly nonfunctional values shown on /admin/config. They are intentionally
+# labeled as decoys so source scanners do not mistake them for cloud secrets.
+FAKE_AWS_ACCESS_KEY: str = "DECOY_AWS_ACCESS_KEY_ID"
+FAKE_AWS_SECRET_KEY: str = "DECOY_AWS_SECRET_ACCESS_KEY"
+FAKE_AWS_CANARY_ID: str = "DECOY_AWS_CANARY_ID"
 
 # Progressive auth delay. Delay on the nth failure is min(2^n, AUTH_DELAY_CAP).
 AUTH_DELAY_CAP: int = 30
@@ -60,8 +63,7 @@ MAX_TRACKED_IPS: int = 8192               # Evict oldest failure counters past t
 # fully attacker-controlled and must be ignored so logged source IPs are real.
 TRUST_XFF: bool = os.environ.get("TRUST_XFF", "false").lower() == "true"
 
-# Domain used for the canarytoken email addresses sprinkled into the fake user
-# dataset. Leave blank to disable (all addresses use the corporate domain).
-# Do NOT use "canarytokens.org" here: that literal domain is a well-known
-# honeypot signature. Point this at a canary domain you control.
+# Domain used for decoy email addresses sprinkled into the fake user dataset.
+# Leave blank to disable. Use a domain you control if you want outbound use to
+# be observable.
 CANARY_EMAIL_DOMAIN: str = os.environ.get("CANARY_EMAIL_DOMAIN", "")

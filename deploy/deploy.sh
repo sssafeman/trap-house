@@ -74,7 +74,8 @@ check_port() {
 check_container() {
   local container=$1
   local name=$2
-  local status=$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo "missing")
+  local status
+  status=$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo "missing")
   if [ "$status" = "running" ]; then
     echo "  PASS: ${name} container is running"
     PASS=$((PASS + 1))

@@ -145,7 +145,6 @@ else
   fail "Cowrie capability drop: got '${COWRIE_CAPS}', expected ALL"
 fi
 
-ENDLESSH_READONLY=$(docker inspect trap-endlessh --format '{{.HostConfig.ReadonlyRootfs}}' 2>/dev/null || echo "")
 # Endlessh uses s6-overlay which is incompatible with read-only rootfs.
 # Verify hardening via cap_drop and no-new-privileges instead.
 ENDLESSH_CAPS=$(docker inspect trap-endlessh --format '{{.HostConfig.CapDrop}}' 2>/dev/null || echo "")

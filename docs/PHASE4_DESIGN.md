@@ -1,5 +1,8 @@
 # Trap House Phase 4: Threat Intelligence Dashboard Design
 
+This is the historical design specification. The final implementation is the
+source of truth where it differs from this document.
+
 ## Overview
 Two-component dashboard: Grafana + Loki for log metrics, custom FastAPI frontend for the SOC visualization layer. The frontend is the portfolio showpiece.
 
@@ -45,7 +48,7 @@ services/frontend/
 
 | Method | Path | Query | Returns |
 |--------|------|-------|---------|
-| GET | /api/stats | SELECT count(*) events, count(DISTINCT source_ip) attackers, count(DISTINCT session_id) sessions, count(DISTINCT technique_id) techniques FROM events LEFT JOIN techniques | {events, attackers, sessions, techniques} |
+| GET | /api/stats | Summary counts from events, sessions, and techniques tables, plus 24 hour deltas | {events, attackers, sessions, techniques, events_24h, attackers_24h} |
 | GET | /api/attackers | SELECT source_ip, event_count, session_count, risk_score, tools_detected, mitre_techniques, top_username, last_seen FROM attackers ORDER BY risk_score DESC LIMIT 100 | [{source_ip, event_count, ...}] |
 | GET | /api/events | SELECT event_id, timestamp, source_service, source_ip, event_type, mitre_technique, command, username FROM events ORDER BY timestamp DESC LIMIT ?offset= | [{event_id, timestamp, ...}] |
 | GET | /api/events/filter | WHERE source_service=? AND event_type=? AND source_ip=? | filtered events |
@@ -99,13 +102,13 @@ services/frontend/
 ## Grafana + Loki Integration
 
 ### Loki
-- Image: grafana/loki:3.4.2 (pin by tag)
+- Image: grafana/loki:3.4.2 (digest pinned in Compose)
 - Port: 3100 (internal only)
 - Receives log pushes from log-shipper
 - Config: /etc/loki/local-config.yaml (minimal single-instance)
 
 ### Grafana
-- Image: grafana/grafana:11.5.2 (pin by tag)
+- Image: grafana/grafana:11.5.2 (digest pinned in Compose)
 - Port: 3000 (dev only, SSH tunnel in prod)
 - Data source: Loki (http://loki:3100)
 - Pre-provisioned dashboard via provisioning config

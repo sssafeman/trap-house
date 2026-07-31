@@ -59,8 +59,8 @@ def _build_fake_users() -> list[dict[str, Any]]:
     for i in range(10000):
         name = f"{first[i % len(first)].title()} {last[(i // 7) % len(last)].title()}"
         # Sprinkle canary email addresses through the dataset when a canary
-        # domain is configured. The domain must not be canarytokens.org, whose
-        # literal appearance would fingerprint this as a honeypot.
+        # domain is configured. Operators should use a domain they control so
+        # any later outbound use can be investigated.
         if config.CANARY_EMAIL_DOMAIN and i % 250 == 0:
             email = f"finance.audit{i}@{config.CANARY_EMAIL_DOMAIN}"
         else:

@@ -11,8 +11,8 @@
 # Trade-offs (both features reach the public internet and are blocked by this):
 #   - Frontend IP geolocation (ip-api.com): the attack map still renders, just
 #     without lat/long. Add an ACCEPT rule for its IPs if you want geo back.
-#   - Canarytokens: if you enable ENABLE_CANARYTOKENS, add an ACCEPT rule for
-#     canarytokens.org (see the ALLOWLIST section below).
+#   - Future external canary integration: add an explicit destination rule
+#     only after reviewing its privacy and egress implications.
 #
 # Run as root on the VPS, after the stack is up:  sudo bash deploy/egress-firewall.sh
 # Rules are inserted with a comment tag so re-running replaces them cleanly.
@@ -39,7 +39,11 @@ fi
 echo "External network subnet: $SUBNET"
 
 # Remove any rules we previously added (idempotent), matched by the comment tag.
-while iptables -D DOCKER-USER $(iptables -S DOCKER-USER | grep -m1 -- "$TAG" | sed 's/^-A DOCKER-USER //') 2>/dev/null; do :; done
+while IFS= read -r rule; do
+  rule="${rule#-A DOCKER-USER }"
+  read -r -a rule_args <<< "$rule"
+  iptables -D DOCKER-USER "${rule_args[@]}" 2>/dev/null || true
+done < <(iptables -S DOCKER-USER | grep -F "$TAG" | sed 's/^-A DOCKER-USER //')
 
 # Rules are inserted at the top of DOCKER-USER in reverse priority order.
 # Final effect (top to bottom): allow established/related, allow DNS, allow
@@ -61,7 +65,7 @@ iptables -I DOCKER-USER 1 -s "$SUBNET" -p tcp --dport 53 -j RETURN -m comment --
 iptables -I DOCKER-USER 1 -s "$SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN -m comment --comment "$TAG-allow-established"
 
 # --- ALLOWLIST -------------------------------------------------------------
-# To permit a specific public destination (for canarytokens or geolocation),
+# To permit a specific public destination (for future canary integration or geolocation),
 # add its IP above the default-deny, for example:
 #   iptables -I DOCKER-USER 1 -s "$SUBNET" -d <IP> -p tcp --dport 443 -j RETURN \
 #     -m comment --comment "$TAG-allow-canary"
