@@ -100,7 +100,7 @@ class OutlawKillChain(MovingCameraScene):
         steps = [
             ("T1110.001", "Brute Force", "Hammered root passwords", ACCENT),
             ("T1082", "System Info Discovery", "uname -s -m (arch fingerprint)", PRIMARY),
-            ("T1105", "Ingress Tool Transfer", "SFTP upload: 7 filenames, 423 total uploads", SECONDARY),
+            ("T1105", "Ingress Tool Transfer", "SFTP: 7 filenames, 423 uploads", SECONDARY),
             ("Persistence", "SSH Key + chattr +ai", "rsa-key-20230629 (Outlaw sig)", DANGER),
             ("T1059", "Execution", "clean.sh + setup.sh + redtail binary", ACCENT),
         ]
