@@ -66,8 +66,9 @@ Attacker uploaded a webshell.
 details: { "filename": "shell.php", "upload_path": "/var/www/uploads/shell.php", "file_size": 2048 }
 
 ### credential_use
-Decoy credential was used (triggers canarytoken alert if configured).
-details: { "credential_type": "aws_key", "credential_id": "AKIA-DECOY-001", "canarytoken_triggered": true }
+Decoy credential was used. The current implementation records the configured
+canary mode locally and does not call an external canary service.
+details: { "credential_type": "aws_key", "credential_id": "DECOY_AWS_CANARY_ID", "canarytoken_triggered": true }
 
 ### tarpit_connect
 Connection accepted by Endlessh tarpit.

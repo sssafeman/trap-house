@@ -79,7 +79,7 @@ These credentials work on /login. On success, the app creates a session and logs
 
 Additional decoy credentials planted deeper in the maze:
 - /admin/users reveals backup_admin / B@ckup!P@ss
-- /admin/config reveals AWS keys (AKIATRAPHOUSE...)
+- /admin/config reveals clearly labeled decoy AWS values
 - /admin/backup reveals db_admin / M@z3Loop#999 that loop to /login
 
 ## Routes
