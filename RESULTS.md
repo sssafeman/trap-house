@@ -20,7 +20,7 @@ Final frozen totals:
 - 226 command execution events
 - 266 proxy request and data events
 
-The raw sensor acceptance ratio was 0.8034 percent. This is a Cowrie decoy metric, not a real compromise rate.
+The stored-row sensor acceptance ratio was 0.8034 percent. A Cowrie-only login outcome calculation gives 0.7970 percent. Neither figure is a real compromise rate because accepted credentials entered an emulated shell.
 
 ## Strongest finding: repeated Outlaw or RedTail chain
 

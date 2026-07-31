@@ -90,7 +90,7 @@ The busiest days were 2026-07-09 with 74,900 events, 2026-07-30 with 39,404 even
 
 ## Authentication analysis
 
-There were 54,143 authentication attempts and 435 decoy successes. The raw sensor-level acceptance ratio was 0.8034 percent. This is not a real compromise rate. Cowrie intentionally accepted selected credentials and routed attackers into the emulated shell.
+There were 54,143 authentication attempts and 435 decoy successes. The stored-row sensor acceptance ratio was 0.8034 percent. A Cowrie-only login outcome calculation, using 54,099 failed Cowrie logins plus 435 successful Cowrie logins, gives 0.7970 percent. The difference comes from 44 deception-gateway authentication rows that do not contain a raw Cowrie login event ID. Neither figure is a real compromise rate. Cowrie intentionally accepted selected credentials and routed attackers into the emulated shell.
 
 The most targeted usernames were:
 
@@ -199,22 +199,24 @@ A separate pattern appeared in command input and should not be merged into the O
 
 This pattern maps cleanly to T1105 and T1059. It demonstrates why detection should watch for shell processes making outbound connections on arbitrary ports, not only for `curl` and `wget` binaries.
 
-The sensor logged these commands but did not fetch or execute the payload. The fixed size, fallback chain, and encoded argument are behavioral indicators, not proof of the payload's final malware family.
+The sensor logged these commands but did not fetch or execute the payload. It separately recorded 7 file-download events from two sources across five URLs and six hashes. The fixed size, fallback chain, and encoded argument are behavioral indicators, not proof of the payload's final malware family.
 
 ## Proxy and relay abuse
 
-The deception layer recorded 266 proxy request or proxy data events. The strongest repeated patterns were:
+The deception layer recorded 266 explicit proxy request or proxy data events. It also recorded 90 unmapped direct TCP fingerprint events. These categories are kept separate below:
 
 <table>
-<thead><tr><th>Source</th><th>Destination</th><th>Events</th><th>Interpretation</th></tr></thead>
+<thead><tr><th>Destination</th><th>Explicit proxy events</th><th>Direct TCP fingerprint events</th><th>Sessions</th><th>Interpretation</th></tr></thead>
 <tbody>
-<tr><td>195.178.110.137</td><td>8.8.8.8:443</td><td>132</td><td>Repeated relay or connectivity test</td></tr>
-<tr><td>176.53.159.196</td><td>1.1.1.1:53</td><td>58</td><td>DNS proxy or open resolver test</td></tr>
-<tr><td>45.148.10.121</td><td>141.101.90.1:3478</td><td>48</td><td>STUN or TURN relay attempt</td></tr>
-<tr><td>64.89.162.38</td><td>itself:80</td><td>6</td><td>HTTP open proxy test</td></tr>
+<tr><td>8.8.8.8:443</td><td>132</td><td>66</td><td>66</td><td>Repeated HTTPS relay attempts</td></tr>
+<tr><td>141.101.90.1:3478</td><td>48</td><td>24</td><td>24</td><td>STUN or TURN relay attempts</td></tr>
+<tr><td>1.1.1.1:53</td><td>58</td><td>0</td><td>29</td><td>DNS forwarding attempts</td></tr>
+<tr><td>77.88.21.158:25</td><td>20</td><td>0</td><td>20</td><td>SMTP forwarding attempts</td></tr>
+<tr><td>64.89.162.38:80</td><td>6</td><td>0</td><td>3</td><td>HTTP forwarding attempts</td></tr>
+<tr><td>185.242.3.121:80</td><td>2</td><td>0</td><td>1</td><td>HTTP forwarding attempt</td></tr>
 </tbody></table>
 
-Additional one-off SMTP relay attempts targeted port 25 on a remote destination. These events are useful because they show attackers testing whether the deception service can be repurposed as an outbound relay. The current MITRE mapper does not assign T1090 to this behavior. That is a clear future improvement if the sensor is ever redeployed.
+The largest individual source behaviors were `195.178.110.137` to `8.8.8.8:443` with 132 explicit proxy events and 66 direct TCP fingerprint events, `45.148.10.121` to `141.101.90.1:3478` with 48 explicit proxy events and 24 direct TCP fingerprint events, and `176.53.159.196` to `1.1.1.1:53` with 58 explicit proxy events. Additional SMTP relay attempts targeted port 25 on a remote destination. These events show attackers testing whether the deception service can be repurposed as an outbound relay. The current MITRE mapper does not assign T1090 to this behavior. That is a clear future improvement if the sensor is ever redeployed.
 
 ## Dominant automated noise
 
@@ -242,6 +244,14 @@ The contrast is important. 101.201.76.235 generated a large amount of brute-forc
 6. Separate brute-force volume from post-authentication risk. A lower-volume source that uploads files and executes commands deserves more attention than a noisy scanner that never authenticates.
 7. Add explicit T1090 mapping for proxy requests and preserve destination IP and port as first-class fields.
 8. Keep the sensor non-executing. The deception value came from capturing the complete attempted chain without turning the VPS into a malware host.
+
+## Schema and mapper caveats
+
+The database contains 66,299 rows in the sessions table, while 66,222 distinct non-null event session IDs appear in the events table. The difference is 77 zero-event session rows created by the services. Forty-four deception-gateway authentication events have null session IDs. These are schema accounting details, not missing attack evidence.
+
+Event timestamps use two UTC serializations: `Z` for 297,555 rows and `+00:00` for 1,373 rows. Both represent UTC, but analysis tooling should normalize them before sorting or grouping.
+
+The mapper processed all 298,928 events. The enriched techniques table contains 232,314 rows, while 122,115 processed events have no matching technique row. This is expected for events that do not match a configured rule. T1049 and T1087 remain inflated by pre-authentication mapping, as described above.
 
 ## Limitations
 
